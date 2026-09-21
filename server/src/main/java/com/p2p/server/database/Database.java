@@ -29,11 +29,21 @@ public final class Database implements AutoCloseable {
             "CREATE TABLE IF NOT EXISTS chat_rooms (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, owner_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS room_members (room_id INTEGER NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(room_id,user_id))",
             "CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id INTEGER NOT NULL REFERENCES users(id), receiver_id INTEGER REFERENCES users(id), room_id INTEGER REFERENCES chat_rooms(id), content TEXT NOT NULL, created_at TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS shared_files (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, file_name TEXT NOT NULL, file_size INTEGER NOT NULL, sha256 TEXT, peer_ip TEXT, peer_port INTEGER, created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS shared_files (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, file_name TEXT NOT NULL, file_size INTEGER NOT NULL, sha256 TEXT, share_token TEXT, peer_ip TEXT, peer_port INTEGER, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS file_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id INTEGER, receiver_id INTEGER, file_name TEXT NOT NULL, file_size INTEGER NOT NULL, sha256 TEXT, status TEXT NOT NULL, started_at TEXT NOT NULL, completed_at TEXT)"
         };
         try (Statement statement = connection.createStatement()) {
             for (String table : tables) statement.execute(table);
+        }
+        ensureColumn("shared_files", "share_token", "TEXT");
+    }
+
+    private void ensureColumn(String table, String column, String type) throws SQLException {
+        try (Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (rs.next()) if (column.equalsIgnoreCase(rs.getString("name"))) return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + type);
         }
     }
 
@@ -113,22 +123,48 @@ public final class Database implements AutoCloseable {
         return ids;
     }
 
-    public synchronized void shareFile(long ownerId, String name, long size, String sha256, String ip, int port) throws SQLException {
-        String sql = "INSERT INTO shared_files(owner_id,file_name,file_size,sha256,peer_ip,peer_port,created_at) VALUES (?,?,?,?,?,?,?)";
+    public synchronized List<Room> rooms(long userId) throws SQLException {
+        String sql = "SELECT r.id,r.name,u.username," +
+                "EXISTS(SELECT 1 FROM room_members mine WHERE mine.room_id=r.id AND mine.user_id=?)," +
+                "COUNT(m.user_id) FROM chat_rooms r JOIN users u ON u.id=r.owner_id " +
+                "LEFT JOIN room_members m ON m.room_id=r.id GROUP BY r.id,r.name,u.username ORDER BY r.name COLLATE NOCASE";
+        List<Room> rooms = new ArrayList<>();
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
-            ps.setLong(1, ownerId); ps.setString(2, name); ps.setLong(3, size); ps.setString(4, sha256); ps.setString(5, ip); ps.setInt(6, port); ps.setString(7, Instant.now().toString()); ps.executeUpdate();
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) rooms.add(new Room(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getBoolean(4), rs.getInt(5)));
+            }
+        }
+        return rooms;
+    }
+
+    public synchronized void shareFile(long ownerId, String name, long size, String sha256, String shareToken, String ip, int port) throws SQLException {
+        try (PreparedStatement delete = connection.prepareStatement("DELETE FROM shared_files WHERE owner_id=? AND file_name=?")) {
+            delete.setLong(1, ownerId);
+            delete.setString(2, name);
+            delete.executeUpdate();
+        }
+        String sql = "INSERT INTO shared_files(owner_id,file_name,file_size,sha256,share_token,peer_ip,peer_port,created_at) VALUES (?,?,?,?,?,?,?,?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setLong(1, ownerId); ps.setString(2, name); ps.setLong(3, size); ps.setString(4, sha256); ps.setString(5, shareToken); ps.setString(6, ip); ps.setInt(7, port); ps.setString(8, Instant.now().toString()); ps.executeUpdate();
         }
     }
 
-    public synchronized void unshareFile(long ownerId, String name) throws SQLException {
-        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM shared_files WHERE owner_id=? AND file_name=?")) { ps.setLong(1, ownerId); ps.setString(2, name); ps.executeUpdate(); }
+    public synchronized void unshareFile(long ownerId, String shareToken) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM shared_files WHERE owner_id=? AND share_token=?")) { ps.setLong(1, ownerId); ps.setString(2, shareToken); ps.executeUpdate(); }
+    }
+
+    public synchronized void clearSharedFiles(long ownerId) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM shared_files WHERE owner_id=?")) { ps.setLong(1, ownerId); ps.executeUpdate(); }
     }
 
     public synchronized List<SharedFile> searchFiles(String query) throws SQLException {
         List<SharedFile> files = new ArrayList<>();
-        try (PreparedStatement ps = connection.prepareStatement("SELECT file_name,file_size,sha256,peer_ip,peer_port FROM shared_files WHERE file_name LIKE ? ORDER BY file_name")) {
+        String sql = "SELECT f.owner_id,u.username,f.file_name,f.file_size,f.sha256,f.share_token " +
+                "FROM shared_files f JOIN users u ON u.id=f.owner_id WHERE f.file_name LIKE ? ORDER BY f.file_name COLLATE NOCASE";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, "%" + query + "%");
-            try (ResultSet rs = ps.executeQuery()) { while (rs.next()) files.add(new SharedFile(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getInt(5))); }
+            try (ResultSet rs = ps.executeQuery()) { while (rs.next()) files.add(new SharedFile(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getLong(4), rs.getString(5), rs.getString(6))); }
         }
         return files;
     }
@@ -136,5 +172,6 @@ public final class Database implements AutoCloseable {
     @Override public void close() throws SQLException { connection.close(); }
 
     public record User(long id, String username) { }
-    public record SharedFile(String name, long size, String sha256, String ip, int port) { }
+    public record Room(long id, String name, String owner, boolean joined, int memberCount) { }
+    public record SharedFile(long ownerId, String owner, String name, long size, String sha256, String shareToken) { }
 }

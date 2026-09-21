@@ -9,7 +9,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
@@ -17,10 +16,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
-import java.util.Base64;
-import java.util.UUID;
+import java.util.Collection;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,7 +29,7 @@ class LocalConnectionIntegrationTest {
     Path tempDir;
 
     @Test
-    void twoLocalClientsCanJoinChatAndTransferFile() throws Exception {
+    void twoLocalClientsCanJoinChatUseRoomsAndDiscoverPeerFiles() throws Exception {
         int port;
         try (ServerSocket probe = new ServerSocket(0)) {
             port = probe.getLocalPort();
@@ -78,42 +76,43 @@ class LocalConnectionIntegrationTest {
                                 && chat.getRequestId().equals(message.getRequestId()));
                 assertTrue(delivered.bool("success", false));
 
-                byte[] fileBytes = new byte[120_000];
-                for (int i = 0; i < fileBytes.length; i++) fileBytes[i] = (byte) (i * 31);
-                String transferId = UUID.randomUUID().toString();
+                Message createRoom = Message.of(MessageType.CREATE_ROOM).put("name", "Nhóm mạng");
+                alice.send(createRoom);
+                Message created = alice.readUntil(TestPeer.responseTo(createRoom, MessageType.ROOM_UPDATED));
+                long roomId = created.longValue("roomId", -1);
+                assertTrue(roomId > 0);
+
+                Message joinRoom = Message.of(MessageType.JOIN_ROOM).put("roomId", roomId);
+                bob.send(joinRoom);
+                bob.readUntil(TestPeer.responseTo(joinRoom, MessageType.ROOM_UPDATED));
+
+                alice.send(Message.of(MessageType.GROUP_MESSAGE).put("roomId", roomId).put("content", "Chào cả phòng"));
+                Message groupMessage = bob.readUntil(message -> message.getType() == MessageType.GROUP_MESSAGE
+                        && "alice".equals(message.string("sender")));
+                assertEquals("Chào cả phòng", groupMessage.string("content"));
+
+                String transferId = "direct-transfer";
                 alice.send(Message.of(MessageType.FILE_OFFER).put("receiver", "bob")
                         .put("transferId", transferId).put("fileName", "demo.bin")
-                        .put("fileSize", fileBytes.length).put("sha256", "test-hash"));
+                        .put("fileSize", 120_000).put("sha256", "test-hash").put("accessToken", "offer-token"));
                 Message offer = bob.readUntil(message -> message.getType() == MessageType.FILE_OFFER
                         && transferId.equals(message.string("transferId")));
                 assertEquals("alice", offer.string("sender"));
+                assertEquals("offer-token", offer.string("accessToken"));
+                assertEquals(41_001, offer.longValue("peerPort", 0));
 
-                bob.send(Message.of(MessageType.FILE_ACCEPT).put("receiver", "alice")
-                        .put("transferId", transferId));
-                alice.readUntil(message -> message.getType() == MessageType.FILE_ACCEPT
-                        && "bob".equals(message.string("from"))
-                        && transferId.equals(message.string("transferId")));
-
-                int chunkSize = 48 * 1024;
-                for (int offset = 0, sequence = 0; offset < fileBytes.length; offset += chunkSize, sequence++) {
-                    int length = Math.min(chunkSize, fileBytes.length - offset);
-                    byte[] chunk = java.util.Arrays.copyOfRange(fileBytes, offset, offset + length);
-                    alice.send(Message.of(MessageType.FILE_CHUNK).put("receiver", "bob")
-                            .put("transferId", transferId).put("sequence", sequence)
-                            .put("data", Base64.getEncoder().encodeToString(chunk)));
-                }
-                alice.send(Message.of(MessageType.FILE_COMPLETE).put("receiver", "bob")
-                        .put("transferId", transferId).put("fileSize", fileBytes.length));
-
-                ByteArrayOutputStream receivedFile = new ByteArrayOutputStream();
-                while (true) {
-                    Message event = bob.readUntil(message -> transferId.equals(message.string("transferId"))
-                            && (message.getType() == MessageType.FILE_CHUNK
-                            || message.getType() == MessageType.FILE_COMPLETE));
-                    if (event.getType() == MessageType.FILE_COMPLETE) break;
-                    receivedFile.write(Base64.getDecoder().decode(event.string("data")));
-                }
-                assertArrayEquals(fileBytes, receivedFile.toByteArray());
+                Message share = Message.of(MessageType.FILE_SHARE).put("fileName", "linux.iso")
+                        .put("fileSize", 42_000).put("sha256", "shared-hash").put("shareToken", "share-token");
+                alice.send(share);
+                alice.readUntil(TestPeer.responseTo(share, MessageType.FILE_SHARE));
+                Message search = Message.of(MessageType.FILE_SEARCH_REQUEST).put("query", "linux");
+                bob.send(search);
+                Message searchResult = bob.readUntil(TestPeer.responseTo(search, MessageType.FILE_SEARCH_RESPONSE));
+                Collection<?> files = (Collection<?>) searchResult.get("files");
+                assertEquals(1, files.size());
+                Map<?, ?> file = (Map<?, ?>) files.iterator().next();
+                assertEquals("alice", file.get("owner"));
+                assertEquals("share-token", file.get("shareToken"));
             }
         } finally {
             server.close();
@@ -151,14 +150,17 @@ class LocalConnectionIntegrationTest {
         }
 
         private void join(String name) throws Exception {
-            Message join = Message.of(MessageType.JOIN_REQUEST).put("name", name);
+            int peerPort = "alice".equals(name) ? 41_001 : 41_002;
+            Message join = Message.of(MessageType.JOIN_REQUEST).put("name", name)
+                    .put("peerPort", peerPort).put("peerHosts", java.util.List.of("127.0.0.1"));
             send(join);
             Message joined = readUntil(responseTo(join, MessageType.JOIN_RESPONSE));
             assertTrue(joined.bool("success", false), joined.string("message"));
         }
 
         private void joinExpectingFailure(String name) throws Exception {
-            Message join = Message.of(MessageType.JOIN_REQUEST).put("name", name);
+            Message join = Message.of(MessageType.JOIN_REQUEST).put("name", name)
+                    .put("peerPort", 41_003).put("peerHosts", java.util.List.of("127.0.0.1"));
             send(join);
             Message response = readUntil(responseTo(join, MessageType.JOIN_RESPONSE));
             assertFalse(response.bool("success", true));

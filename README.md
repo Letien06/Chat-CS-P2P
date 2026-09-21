@@ -9,9 +9,12 @@ ký tài khoản hoặc mật khẩu.
 - Nhiều client kết nối cùng lúc.
 - Hiển thị danh sách người dùng online.
 - Chat riêng giữa hai client.
-- Gửi và nhận file qua server.
+- Tạo, tham gia, rời và chat trong phòng nhóm.
+- Tìm kiếm file được chia sẻ trong mạng LAN.
+- Truyền file trực tiếp giữa hai client qua TCP P2P; server chỉ làm discovery/signaling.
 - Chạy trên Windows và Linux với Java 17+.
 - Server dùng port TCP `5000` và lắng nghe trên mọi network interface.
+- Mỗi client mở một TCP port khả dụng trong dải `55000-55099` để nhận file trực tiếp từ peer.
 
 ## Cấu trúc project
 
@@ -171,6 +174,30 @@ biến `DISPLAY`:
 ```bash
 echo $DISPLAY
 ```
+
+## Kết nối P2P trực tiếp
+
+Sau khi client tham gia, nó tự mở một peer socket trong dải `55000-55099`. Server
+chỉ chuyển tiếp thông tin điều phối như tên file, SHA-256, IP/port và trạng thái
+chấp nhận. Nội dung file không đi qua `server/ClientHandler.java`.
+
+```text
+Client A ── FILE_OFFER / FILE_ACCEPT ──> Server ── signaling ──> Client B
+Client A ═════════════ raw file bytes over TCP ═══════════════> Client B
+```
+
+Vì vậy cần mở TCP port `5000` cho kết nối tới server và cho phép các kết nối
+TCP giữa các client trong mạng LAN. Với Windows Firewall, cho phép Java hoặc
+JDK chạy trên mạng Private. Với Ubuntu, nếu UFW đang bật:
+
+```bash
+sudo ufw allow 5000/tcp
+sudo ufw allow 55000:55099/tcp
+```
+
+Khi client dùng máy ảo, chọn network adapter giúp hai máy nhìn thấy nhau
+(thường là Host-only hoặc Bridged), rồi kiểm tra địa chỉ bằng `ip addr` và
+`ipconfig`. File nhận được lưu tại thư mục `downloads/` của client nhận.
 
 ## Chọn IP server
 
