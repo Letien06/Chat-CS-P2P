@@ -1,0 +1,10 @@
+target/
+data/
+logs/
+*.db
+*.db-shm
+*.db-wal
+.idea/
+*.iml
+.m2-local/
+downloads/
