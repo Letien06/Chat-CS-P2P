@@ -1,4 +1,4 @@
-# Lumi Chat - P2P Chat Message
+# MiniChat - P2P Chat Message
 
 Ứng dụng chat Java chạy trong mạng LAN, gồm một server TCP và nhiều client
 Windows/Linux. Người dùng chỉ cần nhập tên hiển thị và IP server, không cần đăng
@@ -304,7 +304,7 @@ bị chặn, mở PowerShell bằng quyền Administrator và chạy:
 
 ```powershell
 New-NetFirewallRule `
-  -DisplayName "Lumi Chat TCP 5000" `
+  -DisplayName "MiniChat TCP 5000" `
   -Direction Inbound `
   -Protocol TCP `
   -LocalPort 5000 `
@@ -327,7 +327,7 @@ TCP    0.0.0.0:5000    0.0.0.0:0    LISTENING
 Xóa rule firewall nếu không còn cần:
 
 ```powershell
-Remove-NetFirewallRule -DisplayName "Lumi Chat TCP 5000"
+Remove-NetFirewallRule -DisplayName "MiniChat TCP 5000"
 ```
 
 ## Chỉ gửi file JAR cho bạn bè
@@ -335,7 +335,7 @@ Remove-NetFirewallRule -DisplayName "Lumi Chat TCP 5000"
 Nếu không muốn gửi toàn bộ source, gửi các file sau và giữ đúng cấu trúc:
 
 ```text
-LumiChat/
+MiniChat/
 ├── client-1.0.0-SNAPSHOT-shaded.jar
 ├── server-1.0.0-SNAPSHOT-shaded.jar
 └── server.properties

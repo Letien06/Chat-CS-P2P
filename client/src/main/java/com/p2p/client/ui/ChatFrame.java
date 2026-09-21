@@ -55,7 +55,7 @@ public final class ChatFrame extends JFrame {
     private String activePeer;
 
     public ChatFrame(String username, String serverAddress, ChatClient client) {
-        super("Lumi Chat - " + username);
+        super("MiniChat - " + username);
         this.username = username;
         this.serverAddress = serverAddress;
         this.client = client;
@@ -118,7 +118,7 @@ public final class ChatFrame extends JFrame {
         JPanel contactsHeader = new JPanel();
         contactsHeader.setOpaque(false);
         contactsHeader.setLayout(new BoxLayout(contactsHeader, BoxLayout.Y_AXIS));
-        JLabel appName = new JLabel("Lumi Chat");
+        JLabel appName = new JLabel("MiniChat");
         appName.setFont(Theme.font(Font.BOLD, 19));
         appName.setForeground(Theme.TEXT);
         JLabel onlineLabel = new JLabel("Người dùng đang online");

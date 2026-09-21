@@ -17,7 +17,7 @@ public final class LoginFrame extends JFrame {
     private ChatClient client;
 
     public LoginFrame() {
-        super("Lumi Chat - Kết nối");
+        super("MiniChat - Kết nối");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(920, 620));
         setSize(980, 660);
@@ -54,13 +54,13 @@ public final class LoginFrame extends JFrame {
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0; c.weightx = 1; c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
-        JLabel mark = new JLabel("L");
+        JLabel mark = new JLabel("M");
         mark.setOpaque(true); mark.setBackground(Color.WHITE); mark.setForeground(Theme.PRIMARY);
         mark.setFont(Theme.font(Font.BOLD, 34)); mark.setHorizontalAlignment(SwingConstants.CENTER);
         mark.setPreferredSize(new Dimension(68, 68));
         mark.putClientProperty("FlatLaf.style", "arc:20");
         c.gridy = 0; panel.add(mark, c);
-        JLabel title = new JLabel("Lumi Chat");
+        JLabel title = new JLabel("MiniChat");
         title.setForeground(Color.WHITE); title.setFont(Theme.font(Font.BOLD, 34));
         c.gridy = 1; c.insets = new Insets(24, 0, 0, 0); panel.add(title, c);
         JLabel subtitle = new JLabel("Nói chuyện nhẹ nhàng.\nChia sẻ dễ dàng.");
