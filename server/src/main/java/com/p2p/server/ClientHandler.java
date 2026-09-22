@@ -51,10 +51,9 @@ final class ClientHandler implements Runnable {
                 case CREATE_ROOM -> createRoom(request);
                 case JOIN_ROOM -> joinRoom(request);
                 case LEAVE_ROOM -> leaveRoom(request);
-                case ROOM_LIST_REQUEST -> roomList(request);
                 case GROUP_MESSAGE -> groupMessage(request);
                 case FILE_OFFER -> fileOffer(request);
-                case FILE_ACCEPT, FILE_REJECT, FILE_CANCEL, FILE_COMPLETE, FILE_FAILED -> fileEvent(request);
+                case FILE_ACCEPT, FILE_REJECT, FILE_CANCEL, FILE_CHUNK, FILE_PROGRESS, FILE_COMPLETE, FILE_FAILED -> fileEvent(request);
                 case FILE_SHARE -> shareFile(request);
                 case FILE_UNSHARE -> unshareFile(request);
                 case FILE_SEARCH_REQUEST -> searchFiles(request);
@@ -75,18 +74,7 @@ final class ClientHandler implements Runnable {
             throw new IllegalArgumentException("Tên phải có 1-32 ký tự và không chứa ký tự đặc biệt");
         }
         var user = database.findOrCreateUser(name);
-        int peerPort = (int) request.longValue("peerPort", 0);
-        if (peerPort < 0 || peerPort > 65_535) throw new IllegalArgumentException("Peer port is invalid");
-        List<String> peerHosts = new java.util.ArrayList<>();
-        Object hosts = request.get("peerHosts");
-        if (hosts instanceof java.util.Collection<?> values) {
-            for (Object value : values) {
-                String host = String.valueOf(value).trim();
-                if (!host.isBlank() && host.length() <= 255) peerHosts.add(host);
-            }
-        }
-        database.clearSharedFiles(user.id());
-        session.join(user, peerPort, peerHosts);
+        session.join(user);
         if (!sessions.add(session)) {
             session.leave();
             send(response(MessageType.JOIN_RESPONSE, request).error("Tên này đang được sử dụng"));
@@ -120,7 +108,6 @@ final class ClientHandler implements Runnable {
         if (name.length() > 80) throw new IllegalArgumentException("Room name is too long");
         long roomId = database.createRoom(session.user().id(), name);
         send(response(MessageType.ROOM_UPDATED, request).success(true, "Room created").put("roomId", roomId).put("name", name));
-        sessions.broadcastExcept(session, Message.of(MessageType.ROOM_UPDATED).put("roomId", roomId).put("action", "created"));
     }
 
     private void joinRoom(Message request) throws SQLException, IOException {
@@ -128,7 +115,6 @@ final class ClientHandler implements Runnable {
         long roomId = requiredLong(request, "roomId");
         database.joinRoom(roomId, session.user().id());
         send(response(MessageType.ROOM_UPDATED, request).success(true, "Joined room").put("roomId", roomId).put("username", session.user().username()));
-        sessions.broadcastExcept(session, Message.of(MessageType.ROOM_UPDATED).put("roomId", roomId).put("action", "joined"));
     }
 
     private void leaveRoom(Message request) throws SQLException, IOException {
@@ -136,21 +122,6 @@ final class ClientHandler implements Runnable {
         long roomId = requiredLong(request, "roomId");
         database.leaveRoom(roomId, session.user().id());
         send(response(MessageType.ROOM_UPDATED, request).success(true, "Left room").put("roomId", roomId).put("username", session.user().username()));
-        sessions.broadcastExcept(session, Message.of(MessageType.ROOM_UPDATED).put("roomId", roomId).put("action", "left"));
-    }
-
-    private void roomList(Message request) throws SQLException, IOException {
-        requireJoined();
-        List<java.util.Map<String, Object>> result = database.rooms(session.user().id()).stream().map(room -> {
-            java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
-            item.put("roomId", room.id());
-            item.put("name", room.name());
-            item.put("owner", room.owner());
-            item.put("joined", room.joined());
-            item.put("memberCount", room.memberCount());
-            return item;
-        }).toList();
-        send(response(MessageType.ROOM_LIST_RESPONSE, request).success(true, "OK").put("rooms", result));
     }
 
     private void groupMessage(Message request) throws SQLException, IOException {
@@ -172,14 +143,10 @@ final class ClientHandler implements Runnable {
         long size = requiredLong(request, "fileSize");
         String transferId = request.string("transferId");
         if (transferId == null || transferId.isBlank()) transferId = request.getRequestId();
-        String accessToken = required(request, "accessToken");
         if (size < 0 || size > config.maxFileSize()) throw new IllegalArgumentException("File size is not allowed");
-        if (session.peerPort() <= 0) throw new IllegalArgumentException("Client P2P endpoint is unavailable");
         Session target = sessions.byUsername(receiver);
         if (target == null) { send(response(MessageType.FILE_FAILED, request).error("Recipient is offline")); return; }
-        Message offer = Message.of(MessageType.FILE_OFFER).put("transferId", transferId).put("sender", session.user().username())
-                .put("receiver", receiver).put("fileName", name).put("fileSize", size).put("sha256", request.string("sha256"))
-                .put("accessToken", accessToken).put("peerHosts", session.peerHosts()).put("peerPort", session.peerPort());
+        Message offer = Message.of(MessageType.FILE_OFFER).put("transferId", transferId).put("sender", session.user().username()).put("receiver", receiver).put("fileName", name).put("fileSize", size).put("sha256", request.string("sha256"));
         target.send(offer);
         send(response(MessageType.FILE_OFFER, request).success(true, "Offer sent").put("transferId", transferId));
     }
@@ -190,42 +157,44 @@ final class ClientHandler implements Runnable {
         if (receiver == null) receiver = request.string("sender");
         Session target = sessions.byUsername(receiver);
         if (target == null) {
-            send(response(MessageType.FILE_FAILED, request).error("Recipient is offline"));
+            if (request.getType() != MessageType.FILE_CHUNK && request.getType() != MessageType.FILE_PROGRESS) {
+                send(response(MessageType.FILE_FAILED, request).error("Recipient is offline"));
+            }
             return;
         }
         target.send(request.put("from", session.user().username()));
-        send(response(request.getType(), request).success(true, "Forwarded"));
+        // Chunks and progress are data-plane messages; do not echo an acknowledgement
+        // for every chunk back to the sender.
+        if (request.getType() != MessageType.FILE_CHUNK && request.getType() != MessageType.FILE_PROGRESS) {
+            send(response(request.getType(), request).success(true, "Forwarded"));
+        }
     }
 
     private void shareFile(Message request) throws SQLException, IOException {
         requireJoined();
         String name = required(request, "fileName");
         long size = requiredLong(request, "fileSize");
-        String shareToken = required(request, "shareToken");
-        if (session.peerPort() <= 0) throw new IllegalArgumentException("Client P2P endpoint is unavailable");
-        database.shareFile(session.user().id(), name, size, request.string("sha256"), shareToken, session.peerHosts().get(0), session.peerPort());
-        send(response(MessageType.FILE_SHARE, request).success(true, "File shared").put("shareToken", shareToken));
+        int port = (int) requiredLong(request, "peerPort");
+        database.shareFile(session.user().id(), name, size, request.string("sha256"), request.string("peerIp"), port);
+        send(response(MessageType.FILE_SHARE, request).success(true, "File shared"));
     }
 
     private void unshareFile(Message request) throws SQLException, IOException {
         requireJoined();
-        database.unshareFile(session.user().id(), required(request, "shareToken"));
-        send(response(MessageType.FILE_UNSHARE, request).success(true, "File unshared").put("shareToken", request.string("shareToken")));
+        database.unshareFile(session.user().id(), required(request, "fileName"));
+        send(response(MessageType.FILE_UNSHARE, request).success(true, "File unshared"));
     }
 
     private void searchFiles(Message request) throws SQLException, IOException {
         requireJoined();
         List<Database.SharedFile> files = database.searchFiles(request.string("query") == null ? "" : request.string("query"));
-        List<java.util.Map<String, Object>> result = files.stream().filter(f -> f.shareToken() != null && sessions.byId(f.ownerId()) != null).map(f -> {
-            Session owner = sessions.byId(f.ownerId());
+        List<java.util.Map<String, Object>> result = files.stream().map(f -> {
             java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
-            item.put("owner", f.owner());
             item.put("fileName", f.name());
             item.put("fileSize", f.size());
             item.put("sha256", f.sha256() == null ? "" : f.sha256());
-            item.put("shareToken", f.shareToken());
-            item.put("peerHosts", owner.peerHosts());
-            item.put("peerPort", owner.peerPort());
+            item.put("peerIp", f.ip() == null ? "" : f.ip());
+            item.put("peerPort", f.port());
             return item;
         }).toList();
         send(response(MessageType.FILE_SEARCH_RESPONSE, request).success(true, "OK").put("files", result));
@@ -235,8 +204,6 @@ final class ClientHandler implements Runnable {
         if (session.user() != null) {
             String username = session.user().username();
             sessions.remove(session);
-            try { database.clearSharedFiles(session.user().id()); }
-            catch (SQLException e) { LOG.log(Level.FINE, "Could not clear shared files", e); }
             sessions.broadcast(Message.of(MessageType.USER_STATUS_CHANGED).put("username", username).put("online", false));
         }
         session.close();

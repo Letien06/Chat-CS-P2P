@@ -9,17 +9,13 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
-import java.util.List;
 
 public final class Session implements Closeable {
     private final Socket socket;
     private final DataInputStream input;
     private final DataOutputStream output;
     private final String remoteAddress;
-    private final String remoteHost;
     private volatile Database.User user;
-    private volatile int peerPort;
-    private volatile List<String> peerHosts = List.of();
     private volatile boolean closed;
 
     public Session(Socket socket) throws IOException {
@@ -27,7 +23,6 @@ public final class Session implements Closeable {
         this.input = new DataInputStream(socket.getInputStream());
         this.output = new DataOutputStream(socket.getOutputStream());
         this.remoteAddress = socket.getRemoteSocketAddress().toString();
-        this.remoteHost = socket.getInetAddress().getHostAddress();
     }
 
     public Message read() throws IOException { return FrameCodec.read(input); }
@@ -38,18 +33,9 @@ public final class Session implements Closeable {
     }
 
     public Database.User user() { return user; }
-    public void join(Database.User user, int peerPort, List<String> advertisedHosts) {
-        this.user = user;
-        this.peerPort = peerPort;
-        java.util.LinkedHashSet<String> hosts = new java.util.LinkedHashSet<>();
-        hosts.add(remoteHost);
-        hosts.addAll(advertisedHosts);
-        this.peerHosts = List.copyOf(hosts);
-    }
-    public void leave() { this.user = null; this.peerPort = 0; this.peerHosts = List.of(); }
+    public void join(Database.User user) { this.user = user; }
+    public void leave() { this.user = null; }
     public String remoteAddress() { return remoteAddress; }
-    public int peerPort() { return peerPort; }
-    public List<String> peerHosts() { return peerHosts; }
     public boolean isJoined() { return user != null; }
     public boolean isClosed() { return closed; }
 

@@ -1,7 +1,6 @@
 package com.p2p.client.ui;
 
 import com.p2p.client.network.ChatClient;
-import com.p2p.client.network.PeerFileServer;
 import com.p2p.common.protocol.Message;
 import com.p2p.common.protocol.MessageType;
 
@@ -16,7 +15,6 @@ public final class LoginFrame extends JFrame {
     private final JTextField nameField = new JTextField(18);
     private final JButton joinButton = Theme.primaryButton("Vào phòng chat");
     private ChatClient client;
-    private PeerFileServer peerFileServer;
 
     public LoginFrame() {
         super("MiniChat - Kết nối");
@@ -117,13 +115,10 @@ public final class LoginFrame extends JFrame {
         ChatClient connectingClient = client;
         Thread connectThread = new Thread(() -> {
             try {
-                peerFileServer = new PeerFileServer();
                 connectingClient.connect(host, SERVER_PORT);
-                connectingClient.send(Message.of(MessageType.JOIN_REQUEST).put("name", name)
-                        .put("peerPort", peerFileServer.port()).put("peerHosts", PeerFileServer.localAddresses()));
+                connectingClient.send(Message.of(MessageType.JOIN_REQUEST).put("name", name));
             } catch (IOException e) {
                 connectingClient.close();
-                if (peerFileServer != null) peerFileServer.close();
                 SwingUtilities.invokeLater(() -> { setJoinEnabled(true); showError("Không kết nối được server: " + e.getMessage()); });
             }
         }, "chat-connect");
@@ -132,15 +127,14 @@ public final class LoginFrame extends JFrame {
     }
 
     private void onMessage(Message message) {
-        if (message.getType() == MessageType.ERROR) { setJoinEnabled(true); showError(message.string("message")); closeConnections(); return; }
+        if (message.getType() == MessageType.ERROR) { setJoinEnabled(true); showError(message.string("message")); if (client != null) client.close(); return; }
         if (message.getType() != MessageType.JOIN_RESPONSE) return;
-        if (!message.bool("success", false)) { setJoinEnabled(true); showError(message.string("message")); closeConnections(); return; }
-        ChatFrame frame = new ChatFrame(message.string("name"), hostField.getText().trim() + ":" + SERVER_PORT, client, peerFileServer);
+        if (!message.bool("success", false)) { setJoinEnabled(true); showError(message.string("message")); if (client != null) client.close(); return; }
+        ChatFrame frame = new ChatFrame(message.string("name"), hostField.getText().trim() + ":" + SERVER_PORT, client);
         client.setMessageListener(m -> SwingUtilities.invokeLater(() -> frame.handle(m)));
         frame.requestUsers(); frame.setVisible(true); dispose();
     }
 
     private void setJoinEnabled(boolean enabled) { joinButton.setEnabled(enabled); }
-    private void closeConnections() { if (client != null) client.close(); if (peerFileServer != null) peerFileServer.close(); }
     private void showError(String text) { JOptionPane.showMessageDialog(this, text == null ? "Có lỗi xảy ra." : text, "Lỗi", JOptionPane.ERROR_MESSAGE); }
 }

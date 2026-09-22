@@ -1,8 +1,6 @@
 package com.p2p.client.ui;
 
 import com.p2p.client.network.ChatClient;
-import com.p2p.client.network.PeerFileClient;
-import com.p2p.client.network.PeerFileServer;
 import com.p2p.common.protocol.Message;
 import com.p2p.common.protocol.MessageType;
 
@@ -12,11 +10,14 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,10 +26,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class ChatFrame extends JFrame {
+    private static final int FILE_CHUNK_SIZE = 48 * 1024;
+
     private final String username;
     private final String serverAddress;
     private final ChatClient client;
-    private final PeerFileServer peerFileServer;
     private final DefaultListModel<String> users = new DefaultListModel<>();
     private final JList<String> userList = new JList<>(users);
     private final MessageListPanel transcript = new MessageListPanel();
@@ -44,24 +46,19 @@ public final class ChatFrame extends JFrame {
         return thread;
     });
     private final Map<String, OutgoingTransfer> outgoing = new ConcurrentHashMap<>();
+    private final Map<String, IncomingTransfer> incoming = new ConcurrentHashMap<>();
+    private final Map<String, ExecutorService> incomingWorkers = new ConcurrentHashMap<>();
     private final Map<String, PendingFileOffer> pendingOffers = new ConcurrentHashMap<>();
     private final Map<String, FileCard> fileCards = new ConcurrentHashMap<>();
     private final Map<String, List<ChatEntry>> conversationHistory = new ConcurrentHashMap<>();
-    private final Map<Long, List<ChatEntry>> roomHistory = new ConcurrentHashMap<>();
     private final List<String> onlineUsers = new ArrayList<>();
     private String activePeer;
-    private Long activeRoomId;
-    private String activeRoomName;
 
-    private RoomDialog roomDialog;
-    private FileSearchDialog fileSearchDialog;
-
-    public ChatFrame(String username, String serverAddress, ChatClient client, PeerFileServer peerFileServer) {
+    public ChatFrame(String username, String serverAddress, ChatClient client) {
         super("MiniChat - " + username);
         this.username = username;
         this.serverAddress = serverAddress;
         this.client = client;
-        this.peerFileServer = peerFileServer;
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(900, 620));
         setSize(1180, 760);
@@ -89,14 +86,9 @@ public final class ChatFrame extends JFrame {
         chats.setAlignmentX(Component.CENTER_ALIGNMENT);
         navTop.add(chats);
         navTop.add(Box.createVerticalStrut(10));
-        JButton rooms = Theme.navButton(new AppIcon(AppIcon.Type.CHAT, Theme.MUTED, 21), "Phòng chat", false);
-        rooms.setAlignmentX(Component.CENTER_ALIGNMENT);
-        rooms.addActionListener(e -> openRooms());
-        navTop.add(rooms);
-        navTop.add(Box.createVerticalStrut(10));
-        JButton files = Theme.navButton(new AppIcon(AppIcon.Type.FOLDER, Theme.MUTED, 21), "Tìm và chia sẻ file P2P", false);
+        JButton files = Theme.navButton(new AppIcon(AppIcon.Type.FOLDER, Theme.MUTED, 21), "Gửi file", false);
         files.setAlignmentX(Component.CENTER_ALIGNMENT);
-        files.addActionListener(e -> openFileSearch());
+        files.addActionListener(e -> chooseAndSendFile());
         navTop.add(files);
         navigation.add(navTop, BorderLayout.NORTH);
 
@@ -171,7 +163,7 @@ public final class ChatFrame extends JFrame {
         chatTitle.setFont(Theme.font(Font.BOLD, 17)); chatTitle.setForeground(Theme.TEXT);
         chatStatus.setFont(Theme.font(Font.PLAIN, 12)); chatStatus.setForeground(Theme.MUTED);
         headerText.add(chatTitle); headerText.add(Box.createVerticalStrut(4)); headerText.add(chatStatus); header.add(headerText, BorderLayout.CENTER);
-        JLabel secure = new JLabel("●  File P2P trực tiếp"); secure.setFont(Theme.font(Font.PLAIN, 12)); secure.setForeground(Theme.ONLINE); header.add(secure, BorderLayout.EAST);
+        JLabel secure = new JLabel("●  P2P Relay"); secure.setFont(Theme.font(Font.PLAIN, 12)); secure.setForeground(Theme.MUTED); header.add(secure, BorderLayout.EAST);
         chat.add(header, BorderLayout.NORTH);
         JScrollPane transcriptScroll = new JScrollPane(transcript);
         transcriptScroll.setBorder(BorderFactory.createEmptyBorder());
@@ -244,28 +236,11 @@ public final class ChatFrame extends JFrame {
         catch (IOException e) { showError(e.getMessage()); }
     }
     public void requestUsers() { refreshUsers(); }
-    private void requestRooms() {
-        try { client.send(Message.of(MessageType.ROOM_LIST_REQUEST)); }
-        catch (IOException e) { showError(e.getMessage()); }
-    }
-
-    private void openRooms() {
-        if (roomDialog == null || !roomDialog.isDisplayable()) roomDialog = new RoomDialog();
-        roomDialog.setVisible(true);
-        requestRooms();
-    }
-
-    private void openFileSearch() {
-        if (fileSearchDialog == null || !fileSearchDialog.isDisplayable()) fileSearchDialog = new FileSearchDialog();
-        fileSearchDialog.setVisible(true);
-        fileSearchDialog.search();
-    }
-
     private void selectPeer(String peer) {
         // Refreshing the online-user model briefly clears the JList selection.
         // Keep the active conversation instead of treating that as a user action.
         if (peer == null || peer.equals(username)) {
-            if (activePeer != null || activeRoomId != null) return;
+            if (activePeer != null) return;
             chatTitle.setText("Chọn một cuộc trò chuyện");
             chatStatus.setText("Chọn một người dùng để bắt đầu");
             chatAvatar.setName("?");
@@ -273,8 +248,6 @@ public final class ChatFrame extends JFrame {
             return;
         }
         if (peer.equals(activePeer)) return;
-        activeRoomId = null;
-        activeRoomName = null;
         activePeer = peer;
         chatTitle.setText(peer);
         chatStatus.setText("● Đang hoạt động trong mạng LAN");
@@ -291,17 +264,13 @@ public final class ChatFrame extends JFrame {
     }
 
     private void sendMessage() {
+        String receiver = selectedPeer();
+        if (receiver == null) return;
         String content = messageField.getText().trim();
         if (content.isBlank()) return;
         try {
-            if (activeRoomId != null) {
-                client.send(Message.of(MessageType.GROUP_MESSAGE).put("roomId", activeRoomId).put("content", content));
-            } else {
-                String receiver = selectedPeer();
-                if (receiver == null) return;
-                client.send(Message.of(MessageType.PRIVATE_MESSAGE).put("receiver", receiver).put("content", content));
-                appendToConversation(receiver, "Bạn → " + receiver + ": " + content);
-            }
+            client.send(Message.of(MessageType.PRIVATE_MESSAGE).put("receiver", receiver).put("content", content));
+            appendToConversation(receiver, "Bạn → " + receiver + ": " + content);
             messageField.setText("");
         } catch (IOException e) { showError(e.getMessage()); }
     }
@@ -319,49 +288,17 @@ public final class ChatFrame extends JFrame {
             long size = Files.size(file);
             if (size > 2L * 1024 * 1024 * 1024) { SwingUtilities.invokeLater(() -> showError("File vượt quá giới hạn 2 GB.")); return; }
             String transferId = UUID.randomUUID().toString();
-            String accessToken = UUID.randomUUID().toString();
             String sha256 = sha256(file);
-            outgoing.put(transferId, new OutgoingTransfer(receiver, file, size, sha256, accessToken));
+            outgoing.put(transferId, new OutgoingTransfer(receiver, file, size, sha256));
             SwingUtilities.invokeAndWait(() -> {
                 FileCard card = new FileCard(file.getFileName().toString(), formatBytes(size) + " · Đang chờ người nhận");
                 fileCards.put(transferId, card);
                 addFileCardToConversation(receiver, card, true);
             });
-            peerFileServer.register(accessToken, file, true, new PeerFileServer.Listener() {
-                @Override public void started(String key, String requester) {
-                    SwingUtilities.invokeLater(() -> {
-                        FileCard card = fileCards.get(transferId);
-                        if (card != null) card.markSending(0);
-                    });
-                }
-                @Override public void progress(String key, long sent, long total) {
-                    int value = percent(sent, total);
-                    setProgress(value, "Đang gửi P2P...");
-                    SwingUtilities.invokeLater(() -> {
-                        FileCard card = fileCards.get(transferId);
-                        if (card != null) card.markSending(value);
-                    });
-                }
-                @Override public void completed(String key) {
-                    outgoing.remove(transferId);
-                    SwingUtilities.invokeLater(() -> {
-                        FileCard card = fileCards.get(transferId);
-                        if (card != null) card.markSent();
-                        setProgress(100, "Đã gửi file P2P thành công");
-                    });
-                }
-                @Override public void failed(String key, Exception error) {
-                    SwingUtilities.invokeLater(() -> {
-                        FileCard card = fileCards.get(transferId);
-                        if (card != null) card.markFailed("Gửi P2P thất bại");
-                        showError("Gửi file P2P thất bại: " + error.getMessage());
-                    });
-                }
-            });
             client.send(Message.of(MessageType.FILE_OFFER).put("receiver", receiver).put("fileName", file.getFileName().toString())
-                    .put("fileSize", size).put("sha256", sha256).put("transferId", transferId).put("accessToken", accessToken));
+                    .put("fileSize", size).put("sha256", sha256).put("transferId", transferId));
             setProgress(0, "Đang chờ người nhận...");
-        } catch (Exception e) { SwingUtilities.invokeLater(() -> showError("Không thể chuẩn bị file P2P: " + e.getMessage())); }
+        } catch (Exception e) { SwingUtilities.invokeLater(() -> showError("Không thể chuẩn bị file: " + e.getMessage())); }
     }
 
     private void offerReceived(Message message) {
@@ -370,11 +307,7 @@ public final class ChatFrame extends JFrame {
         String fileName = safeFileName(message.string("fileName"));
         long fileSize = message.longValue("fileSize", -1);
         if (transferId == null || sender == null || fileSize < 0) { showError("Đề nghị file không hợp lệ."); return; }
-        List<String> hosts = strings(message.get("peerHosts"));
-        int port = (int) message.longValue("peerPort", 0);
-        String accessToken = message.string("accessToken");
-        if (hosts.isEmpty() || port <= 0 || accessToken == null) { showError("Peer gửi file không có địa chỉ P2P hợp lệ."); return; }
-        PendingFileOffer offer = new PendingFileOffer(transferId, sender, fileName, fileSize, message.string("sha256"), hosts, port, accessToken);
+        PendingFileOffer offer = new PendingFileOffer(transferId, sender, fileName, fileSize, message.string("sha256"));
         pendingOffers.put(transferId, offer);
         FileCard card = new FileCard(fileName, formatBytes(fileSize) + " · từ " + sender);
         card.showDownload(() -> downloadOffer(offer, card));
@@ -385,37 +318,115 @@ public final class ChatFrame extends JFrame {
     private void downloadOffer(PendingFileOffer offer, FileCard card) {
         if (!pendingOffers.remove(offer.transferId(), offer)) return;
         card.markPreparing();
+        try {
+            Path directory = Path.of("downloads");
+            Files.createDirectories(directory);
+            Path destination = uniqueDestination(directory.resolve(offer.fileName()));
+            incoming.put(offer.transferId(), new IncomingTransfer(destination, offer.fileSize(), offer.sha256()));
+            incomingWorkers.put(offer.transferId(), Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "incoming-file-" + offer.transferId());
+                thread.setDaemon(true);
+                return thread;
+            }));
+            client.send(Message.of(MessageType.FILE_ACCEPT).put("receiver", offer.sender()).put("transferId", offer.transferId()));
+            card.markDownloading(0);
+            setProgress(0, "Đang nhận file...");
+        } catch (Exception e) {
+            incoming.remove(offer.transferId());
+            ExecutorService worker = incomingWorkers.remove(offer.transferId());
+            if (worker != null) worker.shutdownNow();
+            card.markFailed("Không thể tải file");
+            try { client.send(Message.of(MessageType.FILE_REJECT).put("receiver", offer.sender()).put("transferId", offer.transferId())); } catch (IOException ignored) { }
+            showError("Không thể nhận file: " + e.getMessage());
+        }
+    }
+
+    private void startOutgoing(String transferId) {
+        OutgoingTransfer transfer = outgoing.remove(transferId);
+        if (transfer == null) return;
         transfers.submit(() -> {
-            Path destination = null;
-            try {
-                Path directory = Path.of("downloads");
-                Files.createDirectories(directory);
-                destination = uniqueDestination(directory.resolve(offer.fileName()));
-                Path finalDestination = destination;
-                client.send(Message.of(MessageType.FILE_ACCEPT).put("receiver", offer.sender()).put("transferId", offer.transferId()));
+            try (InputStream input = Files.newInputStream(transfer.file)) {
+                byte[] buffer = new byte[FILE_CHUNK_SIZE]; int read; long sent = 0; long sequence = 0;
+                while ((read = input.read(buffer)) != -1) {
+                    byte[] chunk = Arrays.copyOf(buffer, read);
+                    client.send(Message.of(MessageType.FILE_CHUNK).put("receiver", transfer.receiver).put("transferId", transferId)
+                            .put("sequence", sequence++).put("data", Base64.getEncoder().encodeToString(chunk)));
+                    sent += read;
+                    int progress = percent(sent, transfer.size);
+                    setProgress(progress, "Đang gửi file...");
+                    FileCard card = fileCards.get(transferId);
+                    if (card != null) SwingUtilities.invokeLater(() -> card.markSending(progress));
+                }
+                client.send(Message.of(MessageType.FILE_COMPLETE).put("receiver", transfer.receiver).put("transferId", transferId)
+                        .put("fileSize", transfer.size).put("sha256", transfer.sha256));
                 SwingUtilities.invokeLater(() -> {
-                    card.markDownloading(0);
-                    setProgress(0, "Đang nhận file P2P...");
-                });
-                PeerFileClient.download(offer.peerHosts(), offer.peerPort(), offer.accessToken(), username,
-                        destination, offer.fileSize(), offer.sha256(), received -> {
-                            int value = percent(received, offer.fileSize());
-                            setProgress(value, "Đang nhận file P2P...");
-                            SwingUtilities.invokeLater(() -> card.markDownloading(value));
-                        });
-                client.send(Message.of(MessageType.FILE_COMPLETE).put("receiver", offer.sender()).put("transferId", offer.transferId()));
-                SwingUtilities.invokeLater(() -> {
-                    card.markDownloaded(finalDestination, () -> openFile(finalDestination));
-                    setProgress(100, "Nhận file P2P thành công");
+                    FileCard card = fileCards.get(transferId);
+                    if (card != null) card.markSent();
+                    setProgress(100, "Đã gửi file thành công");
                 });
             } catch (Exception e) {
-                if (destination != null) try { Files.deleteIfExists(destination); } catch (IOException ignored) { }
-                try { client.send(Message.of(MessageType.FILE_FAILED).put("receiver", offer.sender()).put("transferId", offer.transferId()).put("message", e.getMessage())); } catch (IOException ignored) { }
                 SwingUtilities.invokeLater(() -> {
-                    card.markFailed("Tải P2P thất bại");
-                    showError("Nhận file P2P thất bại: " + e.getMessage());
+                    FileCard card = fileCards.get(transferId);
+                    if (card != null) card.markFailed("Gửi file thất bại");
+                    showError("Gửi file thất bại: " + e.getMessage());
                 });
             }
+        });
+    }
+
+    private void chunkReceived(Message message) {
+        String transferId = message.string("transferId");
+        IncomingTransfer transfer = incoming.get(transferId);
+        ExecutorService worker = incomingWorkers.get(transferId);
+        if (transfer == null || worker == null) return;
+        worker.submit(() -> {
+            try {
+                byte[] bytes = Base64.getDecoder().decode(message.string("data"));
+                synchronized (transfer) {
+                    if (transfer.output == null) transfer.output = Files.newOutputStream(transfer.destination, StandardOpenOption.CREATE_NEW);
+                    transfer.output.write(bytes); transfer.received += bytes.length;
+                }
+                int progress = percent(transfer.received, transfer.size);
+                setProgress(progress, "Đang nhận file...");
+                FileCard card = fileCards.get(transferId);
+                if (card != null) SwingUtilities.invokeLater(() -> card.markDownloading(progress));
+            } catch (Exception e) { failIncoming(transferId, transfer, e); }
+        });
+    }
+
+    private void completeIncoming(Message message) {
+        String transferId = message.string("transferId");
+        IncomingTransfer transfer = incoming.remove(transferId);
+        ExecutorService worker = incomingWorkers.get(transferId);
+        if (transfer == null || worker == null) return;
+        worker.submit(() -> {
+            try {
+                synchronized (transfer) {
+                    if (transfer.output == null) Files.createFile(transfer.destination); else transfer.output.close();
+                }
+                String actualSha256 = sha256(transfer.destination);
+                boolean hashMatches = transfer.sha256 == null || transfer.sha256.isBlank() || transfer.sha256.equalsIgnoreCase(actualSha256);
+                if (transfer.received != transfer.size || !hashMatches) { Files.deleteIfExists(transfer.destination); throw new IOException("Kích thước hoặc SHA-256 không khớp"); }
+                SwingUtilities.invokeLater(() -> {
+                    FileCard card = fileCards.get(transferId);
+                    if (card != null) card.markDownloaded(transfer.destination, () -> openFile(transfer.destination));
+                    setProgress(100, "Nhận file thành công");
+                });
+            } catch (Exception e) { failIncoming(transferId, transfer, e); }
+            finally { incomingWorkers.remove(transferId); worker.shutdown(); }
+        });
+    }
+
+    private void failIncoming(String transferId, IncomingTransfer transfer, Exception error) {
+        try { synchronized (transfer) { if (transfer.output != null) transfer.output.close(); } Files.deleteIfExists(transfer.destination); }
+        catch (IOException ignored) { }
+        incoming.remove(transferId);
+        ExecutorService worker = incomingWorkers.remove(transferId);
+        if (worker != null) worker.shutdownNow();
+        SwingUtilities.invokeLater(() -> {
+            FileCard card = fileCards.get(transferId);
+            if (card != null) card.markFailed("Tải xuống thất bại");
+            showError("Nhận file thất bại: " + error.getMessage());
         });
     }
 
@@ -429,47 +440,14 @@ public final class ChatFrame extends JFrame {
                     appendToConversation(message.string("sender"), message.string("sender") + ": " + message.string("content"));
             }
             case FILE_OFFER -> { if (message.string("sender") != null) offerReceived(message); }
-            case FILE_ACCEPT -> { if (message.string("from") != null) { FileCard card = fileCards.get(message.string("transferId")); if (card != null) card.markSending(0); setProgress(0, "Đang chờ kết nối P2P..."); } }
-            case FILE_REJECT -> { if (message.string("from") != null) { String transferId = message.string("transferId"); OutgoingTransfer transfer = outgoing.remove(transferId); if (transfer != null) peerFileServer.unregister(transfer.accessToken()); FileCard card = fileCards.get(transferId); if (card != null) card.markFailed("Người nhận đã từ chối"); setProgress(0, "File bị từ chối"); } }
-            case FILE_COMPLETE -> { if (message.string("from") != null) { String transferId = message.string("transferId"); OutgoingTransfer transfer = outgoing.remove(transferId); if (transfer != null) peerFileServer.unregister(transfer.accessToken()); FileCard card = fileCards.get(transferId); if (card != null) card.markSent(); setProgress(100, "Đã gửi file P2P thành công"); } }
-            case FILE_FAILED -> { String transferId = message.string("transferId"); OutgoingTransfer transfer = outgoing.remove(transferId); if (transfer != null) peerFileServer.unregister(transfer.accessToken()); FileCard card = fileCards.get(transferId); if (card != null) card.markFailed("Truyền P2P thất bại"); showError("Truyền file P2P thất bại: " + message.string("message")); }
-            case ROOM_LIST_RESPONSE -> { if (roomDialog != null) roomDialog.handle(message); }
-            case ROOM_UPDATED -> { requestRooms(); }
-            case GROUP_MESSAGE -> groupMessageReceived(message);
-            case FILE_SEARCH_RESPONSE, FILE_SHARE, FILE_UNSHARE -> { if (fileSearchDialog != null) fileSearchDialog.handle(message); }
+            case FILE_ACCEPT -> { if (message.string("from") != null) startOutgoing(message.string("transferId")); }
+            case FILE_REJECT -> { if (message.string("from") != null) { outgoing.remove(message.string("transferId")); FileCard card = fileCards.get(message.string("transferId")); if (card != null) card.markFailed("Người nhận đã từ chối"); setProgress(0, "File bị từ chối"); } }
+            case FILE_CHUNK -> chunkReceived(message);
+            case FILE_COMPLETE -> { if (message.string("from") != null) completeIncoming(message); }
+            case FILE_FAILED -> { outgoing.remove(message.string("transferId")); FileCard card = fileCards.get(message.string("transferId")); if (card != null) card.markFailed("Truyền file thất bại"); showError("Truyền file thất bại: " + message.string("message")); }
             case ERROR -> showError(message.string("message"));
             default -> { }
         }
-    }
-
-    private void selectRoom(RoomInfo room) {
-        if (!room.joined()) { showError("Bạn cần tham gia phòng trước khi mở chat."); return; }
-        activePeer = null;
-        userList.clearSelection();
-        activeRoomId = room.id();
-        activeRoomName = room.name();
-        chatTitle.setText("# " + room.name());
-        chatStatus.setText(room.memberCount() + " thành viên · Chủ phòng: " + room.owner());
-        chatAvatar.setName(room.name());
-        chatAvatar.setOnline(true);
-        transcript.removeAll();
-        for (ChatEntry entry : roomHistory.getOrDefault(room.id(), List.of())) renderLine(entry.text());
-        transcript.revalidate();
-        transcript.repaint();
-        scrollTranscriptToBottom();
-        if (roomDialog != null) roomDialog.setVisible(false);
-    }
-
-    private void groupMessageReceived(Message message) {
-        if (message.string("sender") == null || message.string("content") == null) return;
-        long roomId = message.longValue("roomId", -1);
-        if (roomId < 0) return;
-        String sender = message.string("sender");
-        String line = sender.equalsIgnoreCase(username)
-                ? "Bạn → " + (activeRoomName == null ? "phòng" : activeRoomName) + ": " + message.string("content")
-                : sender + ": " + message.string("content");
-        roomHistory.computeIfAbsent(roomId, ignored -> new ArrayList<>()).add(new ChatEntry(line, null, sender.equalsIgnoreCase(username)));
-        if (activeRoomId != null && activeRoomId == roomId) renderLine(line);
     }
 
     private String selectedPeer() {
@@ -532,10 +510,6 @@ public final class ChatFrame extends JFrame {
         });
     }
     private static int percent(long current, long total) { return total <= 0 ? 100 : (int) Math.min(100, current * 100 / total); }
-    private static List<String> strings(Object value) {
-        if (!(value instanceof Collection<?> collection)) return List.of();
-        return collection.stream().map(String::valueOf).filter(item -> !item.isBlank()).toList();
-    }
     private static String safeFileName(String name) { if (name == null || name.isBlank()) return "received-file"; return Path.of(name).getFileName().toString(); }
     private static Path uniqueDestination(Path path) { if (!Files.exists(path)) return path; String name = path.getFileName().toString(); int dot = name.lastIndexOf('.'); String base = dot > 0 ? name.substring(0, dot) : name; String ext = dot > 0 ? name.substring(dot) : ""; int index = 1; Path candidate; do { candidate = path.resolveSibling(base + " (" + index++ + ")" + ext); } while (Files.exists(candidate)); return candidate; }
     private static String formatBytes(long bytes) { if (bytes < 1024) return bytes + " B"; if (bytes < 1024 * 1024) return (bytes / 1024) + " KB"; return String.format("%.1f MB", bytes / 1024d / 1024d); }
@@ -577,12 +551,7 @@ public final class ChatFrame extends JFrame {
             row.add(group, BorderLayout.EAST);
         } else {
             bubble = new MessageBubble(visible, Theme.FILE_CARD, Theme.TEXT);
-            String author = activePeer;
-            if (author == null) {
-                int separator = visible.indexOf(':');
-                author = separator > 0 ? visible.substring(0, separator) : "Phòng";
-            }
-            JPanel group = messageGroup(bubble, new Theme.Avatar(author, 30, true), false);
+            JPanel group = messageGroup(bubble, new Theme.Avatar(activePeer, 30, true), false);
             row.add(group, BorderLayout.WEST);
         }
         transcript.add(row); transcript.revalidate(); transcript.repaint();
@@ -598,248 +567,11 @@ public final class ChatFrame extends JFrame {
     }
     private static String escapeHtml(String text) { return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }
     private void showError(String text) { JOptionPane.showMessageDialog(this, text == null ? "Có lỗi xảy ra." : text, "Lỗi", JOptionPane.ERROR_MESSAGE); }
-    @Override public void dispose() { toastTimer.stop(); transfers.shutdownNow(); if (roomDialog != null) roomDialog.dispose(); if (fileSearchDialog != null) fileSearchDialog.dispose(); peerFileServer.close(); client.close(); super.dispose(); }
+    @Override public void dispose() { toastTimer.stop(); transfers.shutdownNow(); client.close(); super.dispose(); }
     private record ChatEntry(String text, FileCard fileCard, boolean mine) { }
-    private record OutgoingTransfer(String receiver, Path file, long size, String sha256, String accessToken) { }
-    private record PendingFileOffer(String transferId, String sender, String fileName, long fileSize, String sha256, List<String> peerHosts, int peerPort, String accessToken) { }
-    private record RoomInfo(long id, String name, String owner, boolean joined, int memberCount) {
-        @Override public String toString() { return (joined ? "✓ " : "  ") + name + "  ·  " + memberCount + " thành viên  ·  " + owner; }
-    }
-    private record SharedFileInfo(String owner, String fileName, long fileSize, String sha256, String shareToken, List<String> peerHosts, int peerPort) {
-        @Override public String toString() { return fileName + "  ·  " + formatBytes(fileSize) + "  ·  từ " + owner; }
-    }
-
-    private final class RoomDialog extends JDialog {
-        private final DefaultListModel<RoomInfo> model = new DefaultListModel<>();
-        private final JList<RoomInfo> list = new JList<>(model);
-        private final JLabel status = new JLabel("Chọn phòng để tham gia hoặc mở chat.");
-        private final JButton join = new JButton("Tham gia");
-        private final JButton leave = new JButton("Rời phòng");
-        private final JButton open = new JButton("Mở chat");
-
-        private RoomDialog() {
-            super(ChatFrame.this, "Phòng chat", false);
-            setSize(620, 470);
-            setLocationRelativeTo(ChatFrame.this);
-            JPanel root = new JPanel(new BorderLayout(12, 12));
-            root.setBorder(Theme.padding(18, 18, 18, 18));
-            JLabel title = new JLabel("Phòng chat");
-            title.setFont(Theme.font(Font.BOLD, 22));
-            title.setForeground(Theme.TEXT);
-            root.add(title, BorderLayout.NORTH);
-            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-            list.setFixedCellHeight(42);
-            list.addListSelectionListener(event -> updateButtons());
-            root.add(new JScrollPane(list), BorderLayout.CENTER);
-            JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            JButton create = Theme.primaryButton("Tạo phòng");
-            create.addActionListener(event -> createRoom());
-            JButton refresh = Theme.ghostButton("Làm mới");
-            refresh.addActionListener(event -> requestRooms());
-            join.addActionListener(event -> changeMembership(true));
-            leave.addActionListener(event -> changeMembership(false));
-            open.addActionListener(event -> { RoomInfo room = list.getSelectedValue(); if (room != null) selectRoom(room); });
-            controls.add(create); controls.add(refresh); controls.add(join); controls.add(leave); controls.add(open);
-            JPanel south = new JPanel(new BorderLayout(0, 8));
-            south.add(controls, BorderLayout.NORTH);
-            status.setForeground(Theme.MUTED);
-            south.add(status, BorderLayout.SOUTH);
-            root.add(south, BorderLayout.SOUTH);
-            setContentPane(root);
-            updateButtons();
-        }
-
-        private void createRoom() {
-            String name = JOptionPane.showInputDialog(this, "Tên phòng:", "Tạo phòng", JOptionPane.PLAIN_MESSAGE);
-            if (name == null || name.isBlank()) return;
-            try { client.send(Message.of(MessageType.CREATE_ROOM).put("name", name.trim())); }
-            catch (IOException error) { showError(error.getMessage()); }
-        }
-
-        private void changeMembership(boolean joining) {
-            RoomInfo room = list.getSelectedValue();
-            if (room == null) return;
-            try {
-                client.send(Message.of(joining ? MessageType.JOIN_ROOM : MessageType.LEAVE_ROOM).put("roomId", room.id()));
-            } catch (IOException error) { showError(error.getMessage()); }
-        }
-
-        private void updateButtons() {
-            RoomInfo room = list.getSelectedValue();
-            join.setEnabled(room != null && !room.joined());
-            leave.setEnabled(room != null && room.joined());
-            open.setEnabled(room != null && room.joined());
-        }
-
-        private void handle(Message message) {
-            if (message.getType() != MessageType.ROOM_LIST_RESPONSE) return;
-            Long selectedId = list.getSelectedValue() == null ? null : list.getSelectedValue().id();
-            model.clear();
-            Object value = message.get("rooms");
-            if (value instanceof Collection<?> rooms) for (Object item : rooms) {
-                if (!(item instanceof Map<?, ?> map)) continue;
-                RoomInfo room = new RoomInfo(number(map.get("roomId")), String.valueOf(map.get("name")),
-                        String.valueOf(map.get("owner")), Boolean.parseBoolean(String.valueOf(map.get("joined"))),
-                        (int) number(map.get("memberCount")));
-                model.addElement(room);
-                if (activeRoomId != null && activeRoomId == room.id()) {
-                    if (room.joined()) {
-                        activeRoomName = room.name();
-                        chatStatus.setText(room.memberCount() + " thành viên · Chủ phòng: " + room.owner());
-                    } else {
-                        activeRoomId = null;
-                        activeRoomName = null;
-                        chatTitle.setText("Chọn một cuộc trò chuyện");
-                        chatStatus.setText("Chọn người dùng hoặc phòng chat");
-                        chatAvatar.setName("?");
-                        chatAvatar.setOnline(false);
-                        transcript.removeAll();
-                        transcript.revalidate();
-                        transcript.repaint();
-                    }
-                }
-            }
-            if (selectedId != null) for (int index = 0; index < model.size(); index++) if (model.get(index).id() == selectedId) { list.setSelectedIndex(index); break; }
-            updateButtons();
-            status.setText(model.isEmpty() ? "Chưa có phòng nào." : "Đã tải " + model.size() + " phòng.");
-        }
-    }
-
-    private final class FileSearchDialog extends JDialog {
-        private final JTextField query = new JTextField();
-        private final DefaultListModel<SharedFileInfo> model = new DefaultListModel<>();
-        private final JList<SharedFileInfo> list = new JList<>(model);
-        private final JLabel status = new JLabel("Tìm file được chia sẻ trong mạng.");
-        private final JProgressBar progress = new JProgressBar(0, 100);
-        private final Map<String, Path> localShares = new ConcurrentHashMap<>();
-
-        private FileSearchDialog() {
-            super(ChatFrame.this, "File directory P2P", false);
-            setSize(760, 500);
-            setLocationRelativeTo(ChatFrame.this);
-            JPanel root = new JPanel(new BorderLayout(12, 12));
-            root.setBorder(Theme.padding(18, 18, 18, 18));
-            JLabel title = new JLabel("File directory P2P");
-            title.setFont(Theme.font(Font.BOLD, 22));
-            title.setForeground(Theme.TEXT);
-            list.setFixedCellHeight(42);
-            root.add(new JScrollPane(list), BorderLayout.CENTER);
-            JPanel searchBar = new JPanel(new BorderLayout(8, 0));
-            query.putClientProperty("JTextField.placeholderText", "Tên file cần tìm...");
-            query.addActionListener(event -> search());
-            JButton search = Theme.primaryButton("Tìm");
-            search.addActionListener(event -> search());
-            searchBar.add(query, BorderLayout.CENTER); searchBar.add(search, BorderLayout.EAST);
-            JButton share = Theme.ghostButton("Chia sẻ file của tôi");
-            share.addActionListener(event -> shareFile());
-            JPanel north = new JPanel(new BorderLayout(0, 8));
-            north.add(searchBar, BorderLayout.NORTH); north.add(share, BorderLayout.SOUTH);
-            JPanel header = new JPanel(new BorderLayout(0, 12));
-            header.add(title, BorderLayout.NORTH);
-            header.add(north, BorderLayout.SOUTH);
-            root.add(header, BorderLayout.NORTH);
-            JPanel actions = new JPanel(new BorderLayout(8, 0));
-            JButton download = Theme.primaryButton("Tải trực tiếp P2P");
-            download.addActionListener(event -> downloadSelected());
-            JButton unshare = Theme.ghostButton("Bỏ chia sẻ");
-            unshare.addActionListener(event -> unshareSelected());
-            progress.setVisible(false);
-            actions.add(download, BorderLayout.WEST); actions.add(unshare, BorderLayout.CENTER); actions.add(progress, BorderLayout.EAST);
-            JPanel south = new JPanel(new BorderLayout(0, 8));
-            south.add(actions, BorderLayout.NORTH); status.setForeground(Theme.MUTED); south.add(status, BorderLayout.SOUTH);
-            root.add(south, BorderLayout.SOUTH);
-            setContentPane(root);
-        }
-
-        private void search() {
-            try { client.send(Message.of(MessageType.FILE_SEARCH_REQUEST).put("query", query.getText().trim())); }
-            catch (IOException error) { showError(error.getMessage()); }
-        }
-
-        private void shareFile() {
-            JFileChooser chooser = new JFileChooser();
-            if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
-            Path file = chooser.getSelectedFile().toPath();
-            transfers.submit(() -> {
-                try {
-                    long size = Files.size(file);
-                    String sha256 = sha256(file);
-                    String shareToken = UUID.randomUUID().toString();
-                    peerFileServer.register(shareToken, file, false, null);
-                    localShares.put(shareToken, file);
-                    client.send(Message.of(MessageType.FILE_SHARE).put("fileName", file.getFileName().toString())
-                            .put("fileSize", size).put("sha256", sha256).put("shareToken", shareToken));
-                    SwingUtilities.invokeLater(() -> status.setText("Đã chia sẻ: " + file.getFileName()));
-                } catch (Exception error) { SwingUtilities.invokeLater(() -> showError("Không thể chia sẻ file: " + error.getMessage())); }
-            });
-        }
-
-        private void downloadSelected() {
-            SharedFileInfo file = list.getSelectedValue();
-            if (file == null || file.owner().equalsIgnoreCase(username)) return;
-            transfers.submit(() -> {
-                Path destination = null;
-                try {
-                    Path directory = Path.of("downloads");
-                    Files.createDirectories(directory);
-                    destination = uniqueDestination(directory.resolve(safeFileName(file.fileName())));
-                    Path finalDestination = destination;
-                    SwingUtilities.invokeLater(() -> { progress.setVisible(true); progress.setValue(0); status.setText("Đang tải trực tiếp từ " + file.owner()); });
-                    PeerFileClient.download(file.peerHosts(), file.peerPort(), file.shareToken(), username, destination,
-                            file.fileSize(), file.sha256(), received -> SwingUtilities.invokeLater(() -> progress.setValue(percent(received, file.fileSize()))));
-                    SwingUtilities.invokeLater(() -> { progress.setVisible(false); status.setText("Đã tải P2P: " + finalDestination.toAbsolutePath()); });
-                } catch (Exception error) {
-                    if (destination != null) try { Files.deleteIfExists(destination); } catch (IOException ignored) { }
-                    SwingUtilities.invokeLater(() -> { progress.setVisible(false); showError("Tải file P2P thất bại: " + error.getMessage()); });
-                }
-            });
-        }
-
-        private void unshareSelected() {
-            SharedFileInfo file = list.getSelectedValue();
-            if (file == null || !file.owner().equalsIgnoreCase(username)) return;
-            try { client.send(Message.of(MessageType.FILE_UNSHARE).put("shareToken", file.shareToken())); }
-            catch (IOException error) { showError(error.getMessage()); }
-        }
-
-        private void handle(Message message) {
-            if (message.getType() == MessageType.FILE_SEARCH_RESPONSE) {
-                model.clear();
-                Object value = message.get("files");
-                if (value instanceof Collection<?> files) for (Object item : files) {
-                    if (!(item instanceof Map<?, ?> map)) continue;
-                    model.addElement(new SharedFileInfo(String.valueOf(map.get("owner")), String.valueOf(map.get("fileName")),
-                            number(map.get("fileSize")), String.valueOf(map.get("sha256")), String.valueOf(map.get("shareToken")),
-                            strings(map.get("peerHosts")), (int) number(map.get("peerPort"))));
-                }
-                status.setText(model.size() + " file đang được chia sẻ bởi các peer online.");
-            } else if (message.getType() == MessageType.FILE_SHARE) {
-                if (!message.bool("success", false)) {
-                    String token = message.string("shareToken");
-                    if (token != null) { peerFileServer.unregister(token); localShares.remove(token); }
-                    showError(message.string("message"));
-                } else search();
-            } else if (message.getType() == MessageType.FILE_UNSHARE) {
-                if (message.bool("success", false)) {
-                    String token = message.string("shareToken");
-                    if (token != null) { peerFileServer.unregister(token); localShares.remove(token); }
-                    search();
-                }
-            }
-        }
-
-        @Override public void dispose() {
-            for (String token : localShares.keySet()) peerFileServer.unregister(token);
-            localShares.clear();
-            super.dispose();
-        }
-    }
-
-    private static long number(Object value) {
-        if (value instanceof Number number) return number.longValue();
-        try { return Long.parseLong(String.valueOf(value)); } catch (Exception ignored) { return 0; }
-    }
-
+    private record OutgoingTransfer(String receiver, Path file, long size, String sha256) { }
+    private record PendingFileOffer(String transferId, String sender, String fileName, long fileSize, String sha256) { }
+    private static final class IncomingTransfer { private final Path destination; private final long size; private final String sha256; private long received; private OutputStream output; private IncomingTransfer(Path destination, long size, String sha256) { this.destination = destination; this.size = size; this.sha256 = sha256; } }
     private static final class FileCard extends JPanel {
         private final JLabel status = new JLabel();
         private final JPanel actionSlot = new JPanel(new BorderLayout());
