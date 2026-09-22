@@ -5,9 +5,11 @@ import com.p2p.server.database.Database;
 import com.p2p.server.session.SessionManager;
 
 import java.io.IOException;
+import java.awt.GraphicsEnvironment;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,28 +21,38 @@ public final class ServerMain implements AutoCloseable {
     private static final Logger LOG = Logger.getLogger(ServerMain.class.getName());
     private final ServerConfig config;
     private final Database database;
+    private final ServerObserver observer;
     private final SessionManager sessions = new SessionManager();
     private final ExecutorService clients = Executors.newCachedThreadPool();
     private final AtomicBoolean running = new AtomicBoolean();
     private ServerSocket serverSocket;
 
     public ServerMain(ServerConfig config) throws Exception {
+        this(config, ServerObserver.NONE);
+    }
+
+    public ServerMain(ServerConfig config, ServerObserver observer) throws Exception {
         this.config = config;
+        this.observer = observer == null ? ServerObserver.NONE : observer;
         this.database = new Database(config.databasePath());
     }
 
     public void start() throws IOException {
         serverSocket = new ServerSocket(config.port());
         running.set(true);
-        LOG.info(() -> "P2P Chat server listening on port " + config.port());
+        LOG.info(() -> "MiniChat server listening on port " + config.port());
+        observer.serverStarted(config.port(), config.databasePath().toAbsolutePath().toString(), config.maxClients());
         while (running.get()) {
             try {
                 Socket socket = serverSocket.accept();
                 if (sessions.usernames().size() >= config.maxClients()) { socket.close(); continue; }
                 socket.setKeepAlive(true);
-                clients.submit(new ClientHandler(socket, database, sessions, config));
+                clients.submit(new ClientHandler(socket, database, sessions, config, observer));
             } catch (IOException e) {
-                if (running.get()) LOG.log(Level.WARNING, "Could not accept client", e);
+                if (running.get()) {
+                    LOG.log(Level.WARNING, "Could not accept client", e);
+                    observer.serverError("Không thể nhận client: " + e.getMessage());
+                }
             }
         }
     }
@@ -50,15 +62,29 @@ public final class ServerMain implements AutoCloseable {
         try { if (serverSocket != null) serverSocket.close(); } catch (IOException ignored) { }
         clients.shutdownNow();
         try { database.close(); } catch (Exception e) { LOG.log(Level.WARNING, "Could not close database", e); }
+        observer.serverStopped();
     }
 
     public static void main(String[] args) throws Exception {
         configureLogging();
-        Path configPath = Path.of(args.length == 0 ? "config/server.properties" : args[0]);
+        String configArgument = Arrays.stream(args).filter(arg -> !"--no-ui".equalsIgnoreCase(arg)).findFirst().orElse("config/server.properties");
+        Path configPath = Path.of(configArgument);
         ServerConfig config = ServerConfig.load(configPath);
-        ServerMain server = new ServerMain(config);
+        boolean showUi = !GraphicsEnvironment.isHeadless() && Arrays.stream(args).noneMatch("--no-ui"::equalsIgnoreCase);
+        ServerDashboard dashboard = showUi ? ServerDashboard.create() : null;
+        ServerMain server = new ServerMain(config, dashboard == null ? ServerObserver.NONE : dashboard);
+        if (dashboard != null) {
+            dashboard.setStopAction(server::close);
+            dashboard.showWindow();
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(server::close, "server-shutdown"));
-        server.start();
+        try {
+            server.start();
+        } catch (IOException exception) {
+            if (dashboard != null) dashboard.serverError("Không thể khởi động server: " + exception.getMessage());
+            server.close();
+            if (dashboard == null) throw exception;
+        }
     }
 
     private static void configureLogging() {

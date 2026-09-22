@@ -85,11 +85,6 @@ public final class ChatFrame extends JFrame {
         JButton chats = Theme.navButton(new AppIcon(AppIcon.Type.CHAT, Theme.PRIMARY, 21), "Tin nhắn", true);
         chats.setAlignmentX(Component.CENTER_ALIGNMENT);
         navTop.add(chats);
-        navTop.add(Box.createVerticalStrut(10));
-        JButton files = Theme.navButton(new AppIcon(AppIcon.Type.FOLDER, Theme.MUTED, 21), "Gửi file", false);
-        files.setAlignmentX(Component.CENTER_ALIGNMENT);
-        files.addActionListener(e -> chooseAndSendFile());
-        navTop.add(files);
         navigation.add(navTop, BorderLayout.NORTH);
 
         userList.setFixedCellHeight(58);
@@ -163,7 +158,7 @@ public final class ChatFrame extends JFrame {
         chatTitle.setFont(Theme.font(Font.BOLD, 17)); chatTitle.setForeground(Theme.TEXT);
         chatStatus.setFont(Theme.font(Font.PLAIN, 12)); chatStatus.setForeground(Theme.MUTED);
         headerText.add(chatTitle); headerText.add(Box.createVerticalStrut(4)); headerText.add(chatStatus); header.add(headerText, BorderLayout.CENTER);
-        JLabel secure = new JLabel("●  P2P Relay"); secure.setFont(Theme.font(Font.PLAIN, 12)); secure.setForeground(Theme.MUTED); header.add(secure, BorderLayout.EAST);
+        JLabel secure = new JLabel("●  Client-Server"); secure.setFont(Theme.font(Font.PLAIN, 12)); secure.setForeground(Theme.ONLINE); header.add(secure, BorderLayout.EAST);
         chat.add(header, BorderLayout.NORTH);
         JScrollPane transcriptScroll = new JScrollPane(transcript);
         transcriptScroll.setBorder(BorderFactory.createEmptyBorder());

@@ -1,4 +1,4 @@
-# MiniChat - P2P Chat Message
+# MiniChat - Client-Server Chat
 
 Ứng dụng chat Java chạy trong mạng LAN, gồm một server TCP và nhiều client
 Windows/Linux. Người dùng chỉ cần nhập tên hiển thị và IP server, không cần đăng
@@ -9,7 +9,8 @@ ký tài khoản hoặc mật khẩu.
 - Nhiều client kết nối cùng lúc.
 - Hiển thị danh sách người dùng online.
 - Chat riêng giữa hai client.
-- Gửi và nhận file qua server.
+- Gửi và nhận file qua server (client không kết nối trực tiếp với nhau).
+- Dashboard Swing hiển thị port, database, client đang kết nối và log server.
 - Chạy trên Windows và Linux với Java 17+.
 - Server dùng port TCP `5000` và lắng nghe trên mọi network interface.
 
@@ -114,8 +115,20 @@ java -jar server\target\server-1.0.0-SNAPSHOT-shaded.jar server\config\server.pr
 Khi thành công, terminal hiển thị:
 
 ```text
-P2P Chat server listening on port 5000
+MiniChat server listening on port 5000
 ```
+
+Server cũng tự mở cửa sổ **MiniChat Server**. Dashboard hiển thị port TCP,
+database, số client online, tên/client address và các request đang chạy.
+
+Nếu chạy server trên Linux không có giao diện đồ họa hoặc chỉ muốn chạy nền:
+
+```bash
+java -jar server/target/server-1.0.0-SNAPSHOT-shaded.jar \
+  server/config/server.properties --no-ui
+```
+
+Trong chế độ này, thông tin server vẫn được ghi ra terminal/log như bình thường.
 
 Không đóng terminal server trong lúc các client đang chat.
 
@@ -295,7 +308,8 @@ cd ~/chat_message
 192.168.56.1
 ```
 
-7. Chọn từng người trong danh sách online để chat và gửi file qua lại.
+7. Chọn từng người trong danh sách online để chat và gửi file qua lại. Cả tin
+   nhắn và file đều đi theo luồng `Client A -> Server -> Client B`.
 
 ## Mở Windows Firewall cho port 5000
 

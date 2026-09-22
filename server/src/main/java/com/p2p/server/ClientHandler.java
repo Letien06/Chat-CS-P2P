@@ -20,16 +20,19 @@ final class ClientHandler implements Runnable {
     private final Database database;
     private final SessionManager sessions;
     private final ServerConfig config;
+    private final ServerObserver observer;
 
-    ClientHandler(Socket socket, Database database, SessionManager sessions, ServerConfig config) throws IOException {
+    ClientHandler(Socket socket, Database database, SessionManager sessions, ServerConfig config, ServerObserver observer) throws IOException {
         this.session = new Session(socket);
         this.database = database;
         this.sessions = sessions;
         this.config = config;
+        this.observer = observer == null ? ServerObserver.NONE : observer;
     }
 
     @Override public void run() {
         LOG.info(() -> "Client connected: " + session.remoteAddress());
+        observer.clientConnected(session.remoteAddress());
         try {
             Message message;
             while ((message = session.read()) != null) handle(message);
@@ -42,6 +45,9 @@ final class ClientHandler implements Runnable {
 
     private void handle(Message request) throws IOException {
         if (request.getType() == null) { sendError(request, "Message type is required"); return; }
+        if (request.getType() != MessageType.FILE_CHUNK && request.getType() != MessageType.FILE_PROGRESS) {
+            observer.requestReceived(session.user() == null ? "Chưa đặt tên" : session.user().username(), request.getType());
+        }
         try {
             switch (request.getType()) {
                 case JOIN_REQUEST -> join(request);
@@ -81,6 +87,7 @@ final class ClientHandler implements Runnable {
             return;
         }
         send(response(MessageType.JOIN_RESPONSE, request).success(true, "Đã tham gia phòng chat").put("name", user.username()));
+        observer.clientJoined(session.remoteAddress(), user.username());
         sessions.broadcast(Message.of(MessageType.USER_STATUS_CHANGED).put("username", user.username()).put("online", true));
     }
 
@@ -201,11 +208,12 @@ final class ClientHandler implements Runnable {
     }
 
     private void disconnect() {
+        String username = session.user() == null ? null : session.user().username();
         if (session.user() != null) {
-            String username = session.user().username();
             sessions.remove(session);
             sessions.broadcast(Message.of(MessageType.USER_STATUS_CHANGED).put("username", username).put("online", false));
         }
+        observer.clientDisconnected(session.remoteAddress(), username);
         session.close();
     }
 
