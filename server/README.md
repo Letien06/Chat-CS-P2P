@@ -4,7 +4,7 @@ Entry point của JAR là `com.p2p.server.social.SocialServer`. Từ thư mục 
 
 Cấu hình tại `server/config/social.properties`. Đường dẫn dữ liệu/keystore tương đối với `app.root` tính từ vị trí file cấu hình. Database v2 riêng `data/social-network.db`; không tự nhận tài khoản từ DB MiniChat cũ.
 
-TCP/TLS phục vụ request/response/event có length prefix và correlation ID. Server giới hạn mọi socket, thời hạn handshake/auth/heartbeat và outbound queue. UDP discovery 5001 và typing 5002 có HMAC khóa phiên, replay protection và recheck thành viên. UDP không ghi nghiệp vụ bền vững.
+TCP/TLS phục vụ request/response/event có length prefix và correlation ID. Bản chạy mặc định đặt `network.udp.enabled=false`, chỉ mở TCP/TLS port 5000; client nhập IP/port trực tiếp. UDP cũ chỉ giữ trong mã tương thích kiểm thử.
 
 `SocialService` kiểm tra quyền và thực hiện transaction; `SocialDatabase` có một writer và hai reader, WAL/FULL, migrations và indexes. Domain events được ghi outbox cùng mutation. `MediaService` quản lý quota, transfer, SHA-256, chunk/ACK/resume, thumbnail và ACL khi tải. Filesystem không nằm trong SQLite transaction; commit/recovery có state và ID ổn định cho retry.
 

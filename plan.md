@@ -1,4 +1,4 @@
-# Kế hoạch đồ án cuối kỳ: Mạng xã hội Java Desktop dùng Client–Server, TCP/UDP
+# Kế hoạch đồ án cuối kỳ: Mạng xã hội Java Desktop dùng Client–Server, TCP/TLS
 
 Ngày phân tích: **07/10/2026**. Nền tảng xuất phát: thư mục `chat_message` hiện tại.
 
@@ -31,7 +31,7 @@ Khoảng cách lớn nhất không nằm ở việc thêm vài màn hình. Hiệ
 
 - Giữ **Java 17 + Swing + FlatLaf + Maven**, một server trung tâm; không chuyển framework UI trong lúc nâng cấp nghiệp vụ.
 - Giữ **SQLite** cho một server, mục tiêu nghiệm thu 20 client online và kiểm tra tải 50 connection. Đây là mục tiêu phải đo, chưa phải năng lực đã chứng minh.
-- Dùng cả TCP và UDP: TCP/TLS cho dữ liệu đáng tin cậy; UDP discovery server trong LAN và chỉ báo đang nhập trong chat. UDP bị chặn vẫn dùng được chức năng chính qua IP nhập tay và TCP.
+- Dùng TCP/TLS cho toàn bộ nghiệp vụ: client nhập IP/hostname, TCP port, tài khoản và mật khẩu; request, event, Unicast, Group và Broadcast đều đi qua server TCP.
 - File, avatar và ảnh bài đăng đi **Client → Server → Client**, lưu bền vững ở server; không tiếp tục P2P. Lưu tại server là thay đổi so với relay MiniChat.
 - Một tài khoản có tối đa một phiên đang hoạt động. Thiết bị khác được báo ALREADY_SIGNED_IN; không âm thầm đá phiên cũ.
 - Feed theo thời gian mới nhất, phân trang cursor; chưa làm gợi ý.

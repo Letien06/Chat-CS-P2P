@@ -138,20 +138,12 @@ public final class SocialWindow extends JFrame {
         JTextField user=new JTextField(),display=new JTextField();JPasswordField password=new JPasswordField(),confirmPassword=new JPasswordField();
         String[] offeredServerId={null};String[] offeredHost={null};int[] offeredPort={0};
         addField(fields,"Máy chủ / TCP port",horizontal(hostField,portField));hostField.setColumns(23);portField.setColumns(6);
-        JPanel tlsOptions=vertical();addField(tlsOptions,"Truststore PKCS12",trustField);addField(tlsOptions,"Mật khẩu truststore",trustPassword);tlsOptions.add(horizontal(button("Chọn truststore",()->{JFileChooser c=new JFileChooser();if(c.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)trustField.setText(c.getSelectedFile().getAbsolutePath());})));tlsOptions.setVisible(false);
-        fields.add(horizontal(button("Tìm máy chủ LAN",()->{
-            connection.setText("Đang tìm server trong LAN…");
-            UdpClient.discover(null,5001).whenComplete((offers,error)->invoke(()->{
-                if(error!=null){showError(error);return;}if(offers.isEmpty()){info("Không tìm thấy server. Bạn vẫn có thể nhập địa chỉ IP và port.");return;}
-                String[] options=offers.stream().map(o->o.serverName()+" · "+o.host()+":"+o.tcpPort()).toArray(String[]::new);
-                String selected=(String)JOptionPane.showInputDialog(this,"Chọn máy chủ (TLS vẫn phải xác minh)","Máy chủ LAN",JOptionPane.QUESTION_MESSAGE,null,options,options[0]);
-                if(selected!=null){int i=Arrays.asList(options).indexOf(selected);hostField.setText(offers.get(i).host());portField.setText(""+offers.get(i).tcpPort());offeredServerId[0]=offers.get(i).serverId();offeredHost[0]=offers.get(i).host();offeredPort[0]=offers.get(i).tcpPort();}
-            }));
-        }),button("Thiết lập TLS",()->{tlsOptions.setVisible(!tlsOptions.isVisible());fields.revalidate();fields.repaint();})));
+        JPanel tlsOptions=vertical();addField(tlsOptions,"Truststore PKCS12 (TCP/TLS)",trustField);addField(tlsOptions,"Mật khẩu truststore",trustPassword);tlsOptions.add(horizontal(button("Chọn truststore",()->{JFileChooser c=new JFileChooser();if(c.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)trustField.setText(c.getSelectedFile().getAbsolutePath());})));tlsOptions.setVisible(false);
+        fields.add(horizontal(button("Thiết lập TLS",()->{tlsOptions.setVisible(!tlsOptions.isVisible());fields.revalidate();fields.repaint();})));
         fields.add(tlsOptions);
         fields.add(Box.createVerticalStrut(12));if(register){JPanel names=new JPanel(new GridLayout(1,2,12,0));JPanel usernameColumn=vertical(),displayColumn=vertical();addField(usernameColumn,"Tên đăng nhập",user);addField(displayColumn,"Tên hiển thị",display);names.add(usernameColumn);names.add(displayColumn);names.setMaximumSize(new Dimension(Integer.MAX_VALUE,names.getPreferredSize().height));fields.add(names);}else addField(fields,"Tên đăng nhập",user);
         addField(fields,"Mật khẩu",password);if(register)addField(fields,"Xác nhận mật khẩu",confirmPassword);
-        JLabel state=label("TLS xác minh chứng chỉ · Không lưu mật khẩu",false);fields.add(state);
+        JLabel state=label("TCP/TLS · Nhập IP server, port, tài khoản và mật khẩu · Không lưu mật khẩu",false);fields.add(state);
         JButton submit=Theme.primaryButton(register?"Đăng ký":"Đăng nhập");
         submit.addActionListener(e->{char[] secret=password.getPassword(),repeat=confirmPassword.getPassword(),trust=trustPassword.getPassword();
             if(user.getText().trim().isEmpty()||secret.length<10||secret.length>128){Arrays.fill(secret,'\0');Arrays.fill(repeat,'\0');Arrays.fill(trust,'\0');info("Nhập tên đăng nhập và mật khẩu từ 10–128 ký tự.");return;}
@@ -176,7 +168,7 @@ public final class SocialWindow extends JFrame {
                 thumbnails.bind(client);
                 authenticated=true;SocialClient logged=client;logged.onEvent(event->{media.event(event);invoke(()->{if(client==logged)onEvent(event);});});
                 logged.onDisconnect(errorCause->invoke(()->{if(client==logged&&authenticated)disconnected(errorCause);}));
-                setupUdp(login);showMain();query("STATE_SYNC",of("limit",20),r->refreshCount());showFeed();
+                showMain();query("STATE_SYNC",of("limit",20),r->refreshCount());showFeed();
             }));
         });
         panel.add(scroll(fields));panel.add(horizontal(submit,button(register?"Đã có tài khoản":"Tạo tài khoản",()->showAuth(!register))),BorderLayout.SOUTH);panel.setMinimumSize(new Dimension(550,400));GridBagConstraints constraints=new GridBagConstraints();constraints.fill=GridBagConstraints.VERTICAL;constraints.weighty=1;center.add(panel,constraints);root.add(center);root.revalidate();root.repaint();getRootPane().setDefaultButton(submit);
@@ -398,7 +390,6 @@ public final class SocialWindow extends JFrame {
         chatInput=text("",3);JButton send=Theme.primaryButton("Gửi");send.addActionListener(e->sendMessage(cid,null,chatInput.getText()));JButton attach=button("Đính kèm tệp",()->{JFileChooser c=new JFileChooser();if(c.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION)return;String caption=chatInput.getText();String filename=c.getSelectedFile().getName();media.upload(this,c.getSelectedFile().toPath(),"CHAT_FILE",mid->sendMessage(cid,mid,caption.isBlank()?filename:caption));});
         chatInput.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,0),"send-message");chatInput.getActionMap().put("send-message",new AbstractAction(){public void actionPerformed(ActionEvent e){send.doClick();}});
         chatInput.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,InputEvent.SHIFT_DOWN_MASK),"insert-break");
-        chatInput.getDocument().addDocumentListener(new DocumentListener(){public void insertUpdate(DocumentEvent e){typing();}public void removeUpdate(DocumentEvent e){typing();}public void changedUpdate(DocumentEvent e){typing();}private void typing(){if(udp!=null&&activeConversation==cid)udp.typing(cid,!chatInput.getText().isBlank());}});
         JPanel composer=new JPanel(new BorderLayout(8,8));composer.setBorder(new EmptyBorder(10,24,15,24));composer.add(scroll(chatInput));composer.add(horizontal(attach,send),BorderLayout.SOUTH);
         if(Boolean.FALSE.equals(conv.get("canSend"))||Boolean.FALSE.equals(conv.get("active"))){chatInput.setEnabled(false);send.setEnabled(false);attach.setEnabled(false);typingLabel.setText("Chỉ đọc lịch sử · bạn không còn quyền gửi tin mới");}
         panel.add(composer,BorderLayout.SOUTH);setView("chat",panel,()->syncChat(cid));activeConversation=cid;activeConversationData=new LinkedHashMap<>(conv);earliestSeq=0;latestSeq=0;loadHistory(false);

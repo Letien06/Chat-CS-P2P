@@ -56,10 +56,9 @@ Nếu Windows Firewall chặn kết nối, mở PowerShell bằng quyền Admini
 
 ```powershell
 New-NetFirewallRule -DisplayName 'VKU Social TCP' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5000 -Profile Private
-New-NetFirewallRule -DisplayName 'VKU Social UDP' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5001,5002 -Profile Private
 ```
 
-TCP 5000 dùng cho đăng nhập/chat/file; UDP 5001 cho tìm server, UDP 5002 cho trạng thái đang nhập. Nhập IP thủ công nếu tìm LAN không đi qua mạng máy ảo.
+TCP 5000 dùng cho đăng nhập, chat, Broadcast và file. Bản đồ án mặc định không cần UDP; client nhập IP và port trực tiếp trên form.
 
 ## Một client trên Windows
 

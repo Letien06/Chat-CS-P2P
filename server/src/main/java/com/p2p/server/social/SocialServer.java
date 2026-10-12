@@ -31,7 +31,11 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
     private final ApplicationLock applicationLock;
     private SSLServerSocket listener;
     private UdpService udp;
-    public record Config(Path databasePath, Path storageRoot, String bind, int tcpPort, int discoveryPort, int typingPort, int maxConnections, SSLContext tls, long userQuota, long serverQuota) {
+    public record Config(Path databasePath, Path storageRoot, String bind, int tcpPort, int discoveryPort, int typingPort, int maxConnections, SSLContext tls, long userQuota, long serverQuota, boolean udpEnabled) {
+        /** Compatibility constructor for the existing TCP+UDP integration tests. */
+        public Config(Path databasePath, Path storageRoot, String bind, int tcpPort, int discoveryPort, int typingPort, int maxConnections, SSLContext tls, long userQuota, long serverQuota) {
+            this(databasePath,storageRoot,bind,tcpPort,discoveryPort,typingPort,maxConnections,tls,userQuota,serverQuota,true);
+        }
         public static Config load(Path file) throws Exception {
             Properties p = new Properties();
             try (InputStream in = Files.newInputStream(file)) {
@@ -40,7 +44,8 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
             Path base = file.toAbsolutePath().getParent().resolve(p.getProperty("app.root", "../..")).normalize();
             String password = System.getenv("SOCIAL_TLS_PASSWORD");
             if (password == null || password.length() < 6) throw new IllegalArgumentException("Set SOCIAL_TLS_PASSWORD for server keystore");
-            return new Config(base.resolve(p.getProperty("database.path", "data/social-network.db")), base.resolve(p.getProperty("storage.root", "data/media")), p.getProperty("server.bind", "0.0.0.0"), integer(p,"server.tcp.port",5000,1,65535),integer(p,"server.udp.discovery.port",5001,1,65535), integer(p,"server.udp.realtime.port",5002,1,65535),integer(p,"server.max.connections",50,1,100), TlsContexts.server(base.resolve(p.getProperty("tls.key.store", "config/tls/server.p12")), password.toCharArray()), longValue(p,"media.user.quota.bytes",200L*1024*1024),longValue(p,"media.server.quota.bytes",10L*1024*1024*1024));
+            boolean udp=Boolean.parseBoolean(p.getProperty("network.udp.enabled","false"));
+            return new Config(base.resolve(p.getProperty("database.path", "data/social-network.db")), base.resolve(p.getProperty("storage.root", "data/media")), p.getProperty("server.bind", "0.0.0.0"), integer(p,"server.tcp.port",5000,1,65535),integer(p,"server.udp.discovery.port",5001,1,65535), integer(p,"server.udp.realtime.port",5002,1,65535),integer(p,"server.max.connections",50,1,100), TlsContexts.server(base.resolve(p.getProperty("tls.key.store", "config/tls/server.p12")), password.toCharArray()), longValue(p,"media.user.quota.bytes",200L*1024*1024),longValue(p,"media.server.quota.bytes",10L*1024*1024*1024),udp);
         }
         private static int integer(Properties p,String key,int fallback,int min,int max) {
             int v = Integer.parseInt(p.getProperty(key,String.valueOf(fallback)));
@@ -86,10 +91,10 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
         return listener == null ? config.tcpPort() : listener.getLocalPort();
     }
     public int discoveryPort() {
-        return udp == null ? config.discoveryPort() : udp.getDiscoveryPort();
+        return udp == null ? (config.udpEnabled()?config.discoveryPort():0) : udp.getDiscoveryPort();
     }
     public int typingPort() {
-        return udp == null ? config.typingPort() : udp.getTypingPort();
+        return udp == null ? (config.udpEnabled()?config.typingPort():0) : udp.getTypingPort();
     }
     public int connectionCount() {
         return connections.size();
@@ -109,8 +114,10 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
             }
             );
             listener.bind(new InetSocketAddress(config.bind(),config.tcpPort()));
-            udp=new UdpService(this,"social-java-v2","VKU Social",tcpPort(),config.discoveryPort(),config.typingPort());
-            udp.start();
+            if(config.udpEnabled()) {
+                udp=new UdpService(this,"social-java-v2","VKU Social",tcpPort(),config.discoveryPort(),config.typingPort());
+                udp.start();
+            }
             scheduler.scheduleAtFixedRate(this::dispatchEvents,50,100,TimeUnit.MILLISECONDS);
             scheduler.scheduleAtFixedRate(this::monitor,1,1,TimeUnit.SECONDS);
             scheduler.scheduleAtFixedRate(()-> {
@@ -126,7 +133,7 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
                 }
             }
             ,5,5,TimeUnit.SECONDS);
-            LOG.info("VKU Social TLS="+tcpPort()+" UDP discovery="+discoveryPort()+" typing="+typingPort()+" database="+config.databasePath().toAbsolutePath());
+            LOG.info("VKU Social TCP/TLS="+tcpPort()+" UDP="+(config.udpEnabled()?"enabled":"disabled")+" database="+config.databasePath().toAbsolutePath());
             while(!closed.get()) {
                 try {
                     SSLSocket socket=(SSLSocket)listener.accept();
@@ -155,7 +162,8 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
     }
     private Map<String,Object> hello() {
         Map<String,Boolean> capabilities=new LinkedHashMap<>();
-        for(String s:List.of("auth","profiles","relations","posts","directChat","media","notifications","udpDiscovery","groups","receipts","udpTyping","moderation","transferResume","broadcastChat"))capabilities.put(s,true);
+        for(String s:List.of("auth","profiles","relations","posts","directChat","media","notifications","groups","receipts","moderation","transferResume","broadcastChat"))capabilities.put(s,true);
+        if(config.udpEnabled()) { capabilities.put("udpDiscovery",true); capabilities.put("udpTyping",true); }
         return Map.of("selectedVersion",2,"serverId","social-java-v2","serverTime",System.currentTimeMillis(),"heartbeatIntervalMs",15000, "capabilities",capabilities,"limits",Map.of("maxFrameBytes",WireCodec.MAX_FRAME_BYTES,"pageSize",20,"maxPageSize",50,"imageMaxBytes",5242880,"fileMaxBytes",26214400));
     }
     private void handle(Connection c,WireMessage request) {
@@ -210,9 +218,9 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
                     users.put(id,c);
                 }
                 c.socket.setSoTimeout(45000);
-                Map<String,Object> login=new LinkedHashMap<>(rotateUdp(c));
+                Map<String,Object> login=new LinkedHashMap<>(config.udpEnabled()?rotateUdp(c):Map.of());
                 login.put("user",user);
-                login.put("udp",new LinkedHashMap<>(login));
+                if(config.udpEnabled())login.put("udp",new LinkedHashMap<>(login));
                 login.put("serverTime",System.currentTimeMillis());
                 c.send(WireMessage.response(request,login));
                 presenceChanged(id);
@@ -231,6 +239,7 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
                 return;
             }
             if(type.equals("UDP_SESSION_REFRESH")) {
+                if(!config.udpEnabled())throw new SocialException("UNSUPPORTED_OPERATION","Server này chỉ bật TCP/TLS");
                 c.send(WireMessage.response(request,rotateUdp(c)));
                 return;
             }

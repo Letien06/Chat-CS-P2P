@@ -8,7 +8,7 @@ java -jar client/target/client-1.0.0-SNAPSHOT-shaded.jar
 
 PowerShell: `./scripts/run-client.ps1`; Linux: `./scripts/run-client.sh`. Script Linux có sẵn nhưng Linux/VM/DPI chưa được nghiệm thu trực tiếp; xem [bằng chứng và giới hạn kiểm thử](../docs/implementation-status.md).
 
-Nhập host/TCP port (mặc định 5000), tên đăng nhập và mật khẩu. **Thiết lập TLS** mở truststore/mật khẩu truststore; mặc định `config/tls/truststore.p12`. `SOCIAL_TRUSTSTORE_PASSWORD` ưu tiên hơn `SOCIAL_TLS_PASSWORD`; mật khẩu truststore demo mặc định `changeit`. Có thể đổi đường dẫn bằng `-Dsocial.truststore=...`. Chứng chỉ do người vận hành phân phối trước; không có tùy chọn bỏ xác minh. Tìm server LAN qua UDP 5001 chỉ gợi ý địa chỉ, sau đó vẫn xác minh TLS và đối chiếu serverId. Khi broadcast bị chặn, nhập IP/port thủ công.
+Nhập IP/hostname server và TCP port (mặc định 5000), tên đăng nhập và mật khẩu. **Thiết lập TLS** mở truststore/mật khẩu truststore; mặc định `config/tls/truststore.p12`. `SOCIAL_TRUSTSTORE_PASSWORD` ưu tiên hơn `SOCIAL_TLS_PASSWORD`. Chứng chỉ do người vận hành phân phối trước; client kết nối trực tiếp TCP/TLS.
 
 Đăng ký cần username, tên hiển thị và password 10–128 ký tự; không tự đăng nhập. Tài khoản demo (`demo_alice`, `demo_bob`…) dùng mật khẩu người vận hành đặt trong `SOCIAL_DEMO_PASSWORD` lúc seed; không có mật khẩu tài khoản cố định trong source. Client không lưu password. Mất mạng sẽ thử lại TLS theo backoff rồi yêu cầu login lại. Logout xóa state riêng và cache thumbnail trong bộ nhớ.
 

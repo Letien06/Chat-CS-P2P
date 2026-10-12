@@ -1,5 +1,9 @@
 # Trạng thái triển khai v2 và bằng chứng
 
+## Phạm vi chạy hiện tại
+
+Bản mặc định chạy TCP/TLS trên port 5000. Client nhập IP/hostname, port, tên đăng nhập và mật khẩu trên form. UDP được tắt trong cấu hình mặc định và không cần cho luồng đồ án.
+
 Cập nhật ngày 07/10/2026. Đây là bản triển khai trong working tree trên baseline Git `cf36ff6`, không phải một release commit đã được gắn tag. Các tài liệu 01–07 ban đầu mô tả thiết kế; source và các kết quả dưới đây xác định phần đã làm. Checkbox trong backlog không tự trở thành bằng chứng nghiệm thu.
 
 ## Phần có source chạy được

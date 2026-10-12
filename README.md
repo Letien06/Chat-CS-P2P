@@ -1,6 +1,6 @@
 # Kết Nối — Mạng xã hội Java Desktop
 
-Ứng dụng mạng xã hội quy mô lớp học/LAN, phát triển từ bài tập MiniChat. Bản chạy mặc định dùng **Java 17, Swing/FlatLaf, Client–Server, TCP/TLS, UDP và SQLite**. Mọi dữ liệu và quyền truy cập được quyết định tại server.
+Ứng dụng mạng xã hội quy mô lớp học/LAN, phát triển từ bài tập MiniChat. Bản chạy mặc định dùng **Java 17, Swing/FlatLaf, Client–Server, TCP/TLS và SQLite**. Client nhập IP/hostname, TCP port, tài khoản và mật khẩu trên form đăng nhập.
 
 Đã có tài khoản, hồ sơ/avatar, tìm người/kết bạn/chặn, bài viết có privacy, bảng tin, thích/bình luận, thông báo, chat riêng/nhóm, Broadcast tới tất cả client đang online, lịch sử offline và receipt, truyền file có checksum/resume, báo cáo và quản trị. Đối chiếu triển khai và bằng chứng kiểm thử trong [docs/implementation-status.md](docs/implementation-status.md). Các tài liệu [plan.md](plan.md) và `docs/01` đến `docs/08` giữ đặc tả nghiệp vụ để tiếp tục phát triển.
 
@@ -67,7 +67,7 @@ Không tự cấp quyền admin cho tài khoản đăng ký thông thường.
 
 Máy client nhận **chỉ** `config/tls/truststore.p12` qua kênh tin cậy và mật khẩu truststore. Nhập IP server, chọn truststore và nhập mật khẩu ở màn hình đăng nhập, hoặc đặt `SOCIAL_TRUSTSTORE_PASSWORD`. Nếu SAN/hostname hoặc truststore không khớp, TLS từ chối kết nối.
 
-Mở cổng theo cấu hình trên mạng Private: TCP `5000`, UDP discovery `5001`, UDP typing `5002`. UDP bị chặn vẫn dùng được ứng dụng bằng IP nhập tay; typing/discovery không làm mất chat đã lưu. Không tự thay firewall trong script.
+Mở cổng TCP `5000` theo cấu hình trên mạng Private. Client kết nối trực tiếp bằng IP/hostname và port trên form; không cần mở thêm cổng UDP.
 
 Trên Linux có Java 17 và desktop environment:
 

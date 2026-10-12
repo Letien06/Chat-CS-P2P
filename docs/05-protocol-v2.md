@@ -1,5 +1,7 @@
 # 05 — Hợp đồng giao thức TCP/TLS và UDP phiên bản 2
 
+> Phạm vi đồ án hiện tại: chạy TCP/TLS. UDP được giữ trong mã tương thích cũ nhưng cấu hình mặc định `network.udp.enabled=false`; client không dùng discovery hoặc typing UDP.
+
 Giao thức v2 đã có runtime `SocialServer`, transport `SocialClient` và giao diện `SocialWindow`. MiniChat v1 được giữ riêng trong các class cũ; entry point/shaded JAR mặc định chạy v2. Client/server v2 phải nâng cùng nhau; envelope có protocolVersion sai nhận VERSION_UNSUPPORTED rồi đóng kết nối. Tình trạng kiểm thử và giới hạn triển khai nằm tại [implementation-status](implementation-status.md).
 
 ## 1. TCP framing và envelope
