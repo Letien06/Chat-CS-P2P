@@ -180,6 +180,11 @@ public final class SocialService {
         active(c,b);
         if(!friends(c,a,b))throw error("FRIENDSHIP_REQUIRED");
     }
+    void directAccess(Connection c,long a,long b)throws Exception {
+        if(a==b)throw error("INVALID_REQUEST");
+        active(c,b);
+        if(blocked(c,a,b))throw error("ACTION_FORBIDDEN");
+    }
     void version(Map<String,Object> resource,Map<String,Object> p)throws Exception {
         if(lng(resource,"version")!=number(p,"expectedVersion"))throw new SocialException("VERSION_CONFLICT","Resource changed",map("currentVersion",resource.get("version")));
     }
@@ -239,6 +244,7 @@ public final class SocialService {
     private static final Set<String>MUTATIONS=new HashSet<>();
     static {
         String[] specs= {
+            "USER_LIST:cursor,limit",
             "AUTH_PASSWORD_CHANGE:currentPassword,newPassword","PROFILE_GET:targetUserId","PROFILE_UPDATE*:displayName,bio,expectedVersion","AVATAR_SET*:mediaId,expectedVersion","USER_SEARCH:query,cursor,limit","RELATION_LIST:kind,cursor,limit","PRESENCE_GET:userIds","FRIEND_REQUEST*:targetUserId","FRIEND_ACCEPT*:relationId,expectedVersion","FRIEND_REJECT*:relationId,expectedVersion","FRIEND_CANCEL*:relationId,expectedVersion","FRIEND_REMOVE*:relationId","BLOCK_SET*:targetUserId,blocked","BLOCK_LIST:cursor,limit","POST_CREATE*:content,visibility,mediaIds","POST_GET:postId","POST_UPDATE*:postId,content,visibility,expectedVersion","POST_DELETE*:postId,expectedVersion","FEED_GET:cursor,limit","PROFILE_POSTS_GET:authorId,cursor,limit","COMMENT_LIST:postId,cursor,limit","COMMENT_CREATE*:postId,content","COMMENT_DELETE*:commentId","LIKE_SET*:postId,liked","CONVERSATION_DIRECT_GET_OR_CREATE*:targetUserId","CONVERSATION_LIST:cursor,limit","MESSAGE_SEND*:conversationId,clientMessageId,content,mediaId","MESSAGE_HISTORY:conversationId,beforeSeq,afterSeq,limit","MESSAGE_LOOKUP:clientMessageId","MESSAGE_DELIVERED*:conversationId,throughSeq","MESSAGE_READ*:conversationId,throughSeq","GROUP_CREATE*:title,inviteeIds","GROUP_PUBLIC_LIST:cursor,limit","GROUP_JOIN*:conversationId","GROUP_INVITE*:conversationId,targetUserId","GROUP_INVITE_LIST:cursor,limit","GROUP_INVITE_ACCEPT*:inviteId","GROUP_INVITE_REJECT*:inviteId","GROUP_INVITE_CANCEL*:inviteId","GROUP_MEMBERS_GET:conversationId,cursor,limit","GROUP_RENAME*:conversationId,expectedVersion,title","GROUP_KICK*:conversationId,expectedVersion,userId","GROUP_OWNER_TRANSFER*:conversationId,expectedVersion,userId","GROUP_LEAVE*:conversationId,expectedVersion","GROUP_DISBAND*:conversationId,expectedVersion","NOTIFICATION_LIST:cursor,limit,unreadOnly","NOTIFICATION_READ*:notificationIds","NOTIFICATION_READ_THROUGH*:throughCursor","NOTIFICATION_COUNT:","REPORT_CREATE*:targetType,targetId,reason,description","ADMIN_REPORT_LIST:filter,cursor,limit","ADMIN_REPORT_GET:reportId","ADMIN_REPORT_CLAIM*:reportId,expectedVersion","ADMIN_REPORT_RESOLVE*:reportId,action,reason,expectedVersion","ADMIN_AUDIT_LIST:cursor,limit,filter","ADMIN_AUDIT_GET:auditId","ADMIN_USER_UNSUSPEND*:targetUserId,reason","ADMIN_GROUP_OWNER_TRANSFER*:conversationId,targetUserId,expectedVersion,reason","ADMIN_GROUP_CLOSE*:conversationId,expectedVersion,reason","STATE_SYNC:conversationsCursor,notificationsCursor,includeConversations,includeNotifications,limit"
         }
         ;
@@ -283,15 +289,16 @@ public final class SocialService {
                 String q=text(p,"query",60,false);
                 if(q.length()<2)throw error("INVALID_REQUEST");
                 String pattern="%"+q.replace("!","!!").replace("%","!%").replace("_","!_")+"%";
-                return page(c,a,t+q,p,"SELECT u.id,u.username,p.display_name FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.status='ACTIVE' AND(u.username LIKE ? ESCAPE '!' OR p.display_name LIKE ? ESCAPE '!') AND NOT EXISTS(SELECT 1 FROM blocks b WHERE(b.blocker_id=? AND b.blocked_id=u.id) OR(b.blocked_id=? AND b.blocker_id=u.id)) AND u.id<? ORDER BY u.id DESC",List.of(pattern,pattern,a,a));
+                return userPresence(page(c,a,t+q,p,"SELECT u.id,u.username,p.display_name FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.status='ACTIVE' AND(u.username LIKE ? ESCAPE '!' OR p.display_name LIKE ? ESCAPE '!') AND NOT EXISTS(SELECT 1 FROM blocks b WHERE(b.blocker_id=? AND b.blocked_id=u.id) OR(b.blocked_id=? AND b.blocker_id=u.id)) AND u.id<? ORDER BY u.id DESC",List.of(pattern,pattern,a,a)));
             }
+            case "USER_LIST":return userPresence(page(c,a,t,p,"SELECT u.id,u.username,p.display_name,(SELECT media_id FROM media_bindings WHERE avatar_user_id=u.id) AS avatar_media_id FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.status='ACTIVE' AND u.id<>? AND NOT EXISTS(SELECT 1 FROM blocks b WHERE(b.blocker_id=? AND b.blocked_id=u.id) OR(b.blocked_id=? AND b.blocker_id=u.id)) AND u.id<? ORDER BY u.id DESC",List.of(a,a,a)));
             case "PRESENCE_GET": {
                 Object ids=p.get("userIds");
                 if(!(ids instanceof List<?> list)||list.size()>50)throw error("INVALID_REQUEST");
                 List<Map<String,Object>> items=new ArrayList<>();
                 for(Object id:list) {
                     if(!(id instanceof Number n))throw error("INVALID_REQUEST");
-                    if(n.longValue()==a||friends(c,a,n.longValue()))items.add(map("userId",n.longValue(),"online",presence.test(n.longValue()),"asOf",now()));
+                    if(!rows(c,"SELECT id FROM users WHERE id=? AND status='ACTIVE'",n.longValue()).isEmpty()&&!blocked(c,a,n.longValue()))items.add(map("userId",n.longValue(),"online",presence.test(n.longValue()),"asOf",now()));
                 }
                 return map("items",items);
             }
@@ -467,6 +474,14 @@ public final class SocialService {
         r.put("relationId",r.get("id"));
         return r;
     }
+    Map<String,Object> userPresence(Map<String,Object> result) {
+        for(Object raw:(List<?>)result.get("items")) {
+            Map<String,Object> user=(Map<String,Object>)raw;
+            user.put("online",presence.test(lng(user,"id")));
+            user.put("asOf",now());
+        }
+        return result;
+    }
     void relationsChanged(Connection c,long a,long b,long id,long version)throws Exception {
         update(c,"UPDATE users SET relationships_version=relationships_version+1 WHERE id IN(?,?)",a,b);
         event(c,"RELATION_CHANGED","RELATION",id,version,List.of(a,b));
@@ -526,7 +541,7 @@ public final class SocialService {
         Map<String,Object> m=member(c,a,id);
         if("DIRECT".equals(m.get("kind"))) {
             Map<String,Object> other=one(c,"SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>?",id,a);
-            friendship(c,a,lng(other,"userId"));
+            directAccess(c,a,lng(other,"userId"));
         }
         else if(lng(one(c,"SELECT count(*) n FROM conversation_members m JOIN users u ON u.id=m.user_id WHERE m.conversation_id=? AND m.left_at IS NULL AND u.status='ACTIVE'",id),"n")<2)throw error("INVALID_STATE");
     }
@@ -563,7 +578,7 @@ public final class SocialService {
         switch(t) {
             case "CONVERSATION_DIRECT_GET_OR_CREATE": {
                 long b=number(p,"targetUserId");
-                friendship(c,a,b);
+                directAccess(c,a,b);
                 List<Map<String,Object>> existing=rows(c,"SELECT * FROM conversations WHERE kind='DIRECT' AND direct_low_id=? AND direct_high_id=?",Math.min(a,b),Math.max(a,b));
                 long id;
                 if(existing.isEmpty()) {
@@ -572,7 +587,8 @@ public final class SocialService {
                     join(c,id,b,"MEMBER",1);
                 }
                 else id=lng(existing.get(0),"id");
-                return map("conversationId",id);
+                Map<String,Object> other=current(c,b);
+                return map("conversationId",id,"kind","DIRECT","otherUserId",b,"title",other.get("displayName"),"online",presence.test(b),"asOf",now());
             }
             case "CONVERSATION_LIST":return conversations(c,a,p);
             case "MESSAGE_SEND": {
@@ -798,6 +814,8 @@ public final class SocialService {
                 v.put("otherUserId",other);
                 v.put("title",u.get("displayName"));
                 v.put("otherUsername",u.get("username"));
+                v.put("online",presence.test(other));
+                v.put("asOf",now());
             }
         }
         return result;

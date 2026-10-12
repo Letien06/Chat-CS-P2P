@@ -20,7 +20,7 @@ class SessionPrivacyRuntimeTest {
     }
     @AfterEach void stop() throws Exception { fixture.stop(); }
 
-    @Test void pendingFriendRequestCannotRevealOnlinePresence() throws Exception {
+    @Test void onlinePresenceIsAvailableWithoutAcceptedFriendship() throws Exception {
         try(var a=fixture.client();var b=fixture.client()) {
             a.hello();b.hello();a.register("alice");long bob=b.register("bob");a.login("alice");b.login("bob");
             Map<String,Object> relation=a.call("FRIEND_REQUEST",Map.of("targetUserId",bob));
@@ -31,10 +31,44 @@ class SessionPrivacyRuntimeTest {
                 assertFalse(((Map<?,?>)items.get(0)).containsKey("online"));
                 assertFalse(((Map<?,?>)items.get(0)).containsKey("asOf"));
             }
-            assertTrue(((List<?>)a.call("PRESENCE_GET",Map.of("userIds",List.of(bob))).get("items")).isEmpty());
+            Map<?,?> presence=(Map<?,?>)((List<?>)a.call("PRESENCE_GET",Map.of("userIds",List.of(bob))).get("items")).get(0);
+            assertEquals(Boolean.TRUE,presence.get("online"));
             b.call("FRIEND_ACCEPT",Map.of("relationId",relation.get("relationId"),"expectedVersion",relation.get("version")));
             Map<?,?> friend=(Map<?,?>)((List<?>)a.call("RELATION_LIST",Map.of("kind","FRIENDS")).get("items")).get(0);
             assertEquals(Boolean.TRUE,friend.get("online"));
+        }
+    }
+
+    @Test void strangersCanChatAndPresenceTracksLoginLogoutAndSocketClose() throws Exception {
+        try(var a=fixture.client();var b=fixture.client()) {
+            a.hello();b.hello();a.register("alice");long bob=b.register("bob");a.login("alice");
+            a.event("PRESENCE_CHANGED"); // Consume the actor's own login event.
+            Map<?,?> offline=(Map<?,?>)((List<?>)a.call("USER_LIST",Map.of()).get("items")).get(0);
+            assertEquals(bob,((Number)offline.get("id")).longValue());
+            assertEquals(Boolean.FALSE,offline.get("online"));
+            b.login("bob");
+            Map<String,Object> onlineEvent=a.event("PRESENCE_CHANGED").getPayload();
+            assertEquals(bob,((Number)onlineEvent.get("userId")).longValue());
+            assertEquals(Boolean.TRUE,onlineEvent.get("online"));
+            long conversation=((Number)a.call("CONVERSATION_DIRECT_GET_OR_CREATE",Map.of("targetUserId",bob)).get("conversationId")).longValue();
+            a.call("MESSAGE_SEND",Map.of("conversationId",conversation,"clientMessageId",UUID.randomUUID().toString(),"content","Hello without friendship"));
+            assertEquals("Hello without friendship",b.event("MESSAGE_CREATED").getPayload().get("content"));
+            b.call("MESSAGE_SEND",Map.of("conversationId",conversation,"clientMessageId",UUID.randomUUID().toString(),"content","Reply"));
+            b.call("AUTH_LOGOUT",Map.of());
+            assertEquals(Boolean.FALSE,a.event("PRESENCE_CHANGED").getPayload().get("online"));
+            Map<?,?> state=(Map<?,?>)((List<?>)a.call("PRESENCE_GET",Map.of("userIds",List.of(bob))).get("items")).get(0);
+            assertEquals(Boolean.FALSE,state.get("online"));
+            a.call("MESSAGE_SEND",Map.of("conversationId",conversation,"clientMessageId",UUID.randomUUID().toString(),"content","Stored while offline"));
+            try(var returned=fixture.client()) {
+                returned.hello();returned.login("bob");
+                assertEquals(Boolean.TRUE,a.event("PRESENCE_CHANGED").getPayload().get("online"));
+                assertEquals(3,((List<?>)returned.call("MESSAGE_HISTORY",Map.of("conversationId",conversation)).get("items")).size());
+            }
+            assertEquals(Boolean.FALSE,a.event("PRESENCE_CHANGED").getPayload().get("online"));
+            a.call("BLOCK_SET",Map.of("targetUserId",bob,"blocked",true));
+            assertTrue(((List<?>)a.call("USER_LIST",Map.of()).get("items")).isEmpty());
+            assertTrue(((List<?>)a.call("PRESENCE_GET",Map.of("userIds",List.of(bob))).get("items")).isEmpty());
+            ProtocolRuntimeTest.error("ACTION_FORBIDDEN",a.attempt("CONVERSATION_DIRECT_GET_OR_CREATE",Map.of("targetUserId",bob),UUID.randomUUID().toString()));
         }
     }
 

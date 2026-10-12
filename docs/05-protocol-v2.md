@@ -97,8 +97,9 @@ Client pending request có deadline 10s thường/60s finalize. Timeout = kết 
 | PROFILE_UPDATE* | displayName, bio, expectedVersion | Profile/version của actor |
 | AVATAR_SET* | mediaId, expectedVersion | Avatar binding của actor |
 | USER_SEARCH | query, cursor, limit | User summary được phép thấy |
+| USER_LIST | cursor, limit | Danh sách tài khoản trên server (trừ bản thân, bị chặn hoặc đình chỉ), có online/asOf |
 | RELATION_LIST | kind INCOMING/OUTGOING/FRIENDS, cursor, limit | Relations của actor; FRIENDS có online/asOf theo session |
-| PRESENCE_GET | userIds tối đa 50 | Chỉ friend hiện tại/self; online/asOf snapshot |
+| PRESENCE_GET | userIds tối đa 50 | Tài khoản đang được phép thấy, không cần kết bạn; online/asOf theo phiên TCP đăng nhập |
 | FRIEND_REQUEST* | targetUserId | relationId/status hoặc pending cũ |
 | FRIEND_ACCEPT/REJECT/CANCEL* | relationId, expectedVersion | Status; hướng đúng |
 | FRIEND_REMOVE* | relationId | REMOVED nếu actor thuộc cặp |
@@ -114,7 +115,7 @@ Client pending request có deadline 10s thường/60s finalize. Timeout = kết 
 | COMMENT_CREATE* | postId, content | commentId; policy + notification |
 | COMMENT_DELETE* | commentId | Author comment/post; không edit |
 | LIKE_SET* | postId, liked true/false | liked/count theo viewer |
-| CONVERSATION_DIRECT_GET_OR_CREATE* | targetUserId | conversationId; friend/no block |
+| CONVERSATION_DIRECT_GET_OR_CREATE* | targetUserId | Chat riêng không cần kết bạn; cấm tự nhắn, bị chặn hoặc tài khoản đình chỉ |
 | CONVERSATION_LIST | cursor, limit | Title/member summary/latestSeq/unread |
 | MESSAGE_SEND* | conversationId, clientMessageId, content, mediaId? | STORED + messageId/seq |
 | MESSAGE_HISTORY | conversationId, beforeSeq? hoặc afterSeq?, limit | Page, latestSeq, membership bounds |

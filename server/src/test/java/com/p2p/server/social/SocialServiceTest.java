@@ -108,7 +108,7 @@ class SocialServiceTest {
         Map<String,Object> first=call(a,"MESSAGE_SEND",payload),retry=call(a,"MESSAGE_SEND",payload);
         assertEquals(first.get("messageId"),retry.get("messageId"));
         call(b,"BLOCK_SET",Map.of("targetUserId",a,"blocked",true));
-        assertCode("FRIENDSHIP_REQUIRED",()->call(a,"MESSAGE_SEND",Map.of("conversationId",id,"clientMessageId",UUID.randomUUID().toString(),"content","blocked")));
+        assertCode("ACTION_FORBIDDEN",()->call(a,"MESSAGE_SEND",Map.of("conversationId",id,"clientMessageId",UUID.randomUUID().toString(),"content","blocked")));
         assertEquals(1,((List<?>)call(b,"MESSAGE_HISTORY",Map.of("conversationId",id)).get("items")).size());
         db.close();
         db=new SocialDatabase(dir.resolve("social.db"));

@@ -768,7 +768,7 @@ public final class SocialWindow extends JFrame {
         // Navigation buttons
         sidebar.add(button("📰 Bảng tin", this::showFeed));
         sidebar.add(Box.createVerticalStrut(8));
-        sidebar.add(button("👥 Bạn bè & Tìm người", this::showPeople));
+        sidebar.add(button("👥 Mọi người & Bạn bè", this::showPeople));
         sidebar.add(Box.createVerticalStrut(8));
         sidebar.add(button("💬 Tin nhắn & Nhóm", this::showConversations));
         sidebar.add(Box.createVerticalStrut(8));
@@ -941,8 +941,9 @@ public final class SocialWindow extends JFrame {
             receiveBroadcast(p);
             return;
         }
-        if ("PRESENCE_CHANGED".equals(type) && "people".equals(view)) {
-            updatePresence(body, num(p, "userId"), bool(p, "online"), num(p, "asOf"));
+        if ("PRESENCE_CHANGED".equals(type)) {
+            boolean found = updatePresence(body, num(p, "userId"), bool(p, "online"), num(p, "asOf"));
+            if (!found && "people".equals(view)) eventRefresh.restart();
             return;
         }
         if ("feed".equals(view) && Set.of("POST_INVALIDATED", "COMMENT_INVALIDATED", "LIKE_INVALIDATED").contains(type)) {
@@ -1097,8 +1098,8 @@ public final class SocialWindow extends JFrame {
                     list.add(rendered);
                     list.add(Box.createVerticalStrut(10));
                 }
-                if ("RELATION_LIST".equals(type) && "FRIENDS".equals(base.get("kind")) && !items.isEmpty()) {
-                    List<Long> ids = items.stream().map(r -> num(relationUser(r), "userId", "otherUserId", "targetUserId")).filter(id -> id > 0).toList();
+                if (!items.isEmpty() && (("RELATION_LIST".equals(type) && "FRIENDS".equals(base.get("kind"))) || "USER_LIST".equals(type) || "USER_SEARCH".equals(type))) {
+                    List<Long> ids = items.stream().map(r -> num(relationUser(r), "userId", "otherUserId", "targetUserId", "id")).filter(id -> id > 0).toList();
                     query("PRESENCE_GET", of("userIds", ids), presence -> {
                         if (session != generation) return;
                         for (Map<String, Object> state : rows(presence.get("items"))) {
@@ -1382,7 +1383,7 @@ public final class SocialWindow extends JFrame {
         panel.setOpaque(false);
         JTabbedPane tabs = new JTabbedPane();
         tabs.setFont(Theme.font(Font.BOLD, 13));
-        panel.add(titled("Bạn bè & Tìm kiếm người dùng", button("Làm mới 🔄", this::showPeople)), BorderLayout.NORTH);
+        panel.add(titled("Mọi người trên máy chủ", button("Làm mới 🔄", this::showPeople)), BorderLayout.NORTH);
         panel.add(tabs, BorderLayout.CENTER);
 
         List<Page> pages = new ArrayList<>();
@@ -1399,6 +1400,10 @@ public final class SocialWindow extends JFrame {
                 default -> "📤 Đã gửi";
             }, page.panel);
         }
+        Page everyone = new Page("Mọi người trên máy chủ", "USER_LIST", of(), this::userCard);
+        tabs.insertTab("🌐 Mọi người", null, everyone.panel, "Nhắn tin ngay, không cần kết bạn", 0);
+        tabs.setSelectedIndex(0);
+        pages.add(everyone);
 
         JTextField search = new JTextField(25);
         Page results = new Page("Kết quả tìm kiếm", "USER_SEARCH", of("query", ""), this::userCard);
@@ -1455,7 +1460,7 @@ public final class SocialWindow extends JFrame {
         } else {
             actions.add(primary("Nhắn tin 💬", () -> openDirect(target)));
             actions.add(button("Hủy kết bạn", () -> {
-                if (confirm("Hủy kết bạn với người này? Bạn sẽ không thể gửi tin nhắn mới cho đến khi kết bạn lại.")) {
+                if (confirm("Hủy kết bạn với người này?")) {
                     mutate("FRIEND_REMOVE", of("relationId", relation), null, x -> showPeople());
                 }
             }));
@@ -1465,26 +1470,37 @@ public final class SocialWindow extends JFrame {
         return c;
     }
 
-    private void updatePresence(Container parent, long userId, boolean online, long asOf) {
+    private boolean updatePresence(Container parent, long userId, boolean online, long asOf) {
+        boolean found = false;
         for (Component c : parent.getComponents()) {
             if (c instanceof JLabel label && Objects.equals(label.getClientProperty("presenceUserId"), userId)) {
-                label.setText(online ? "● Đang online" : "○ Offline");
+                label.setText(online ? "● Đang online" : "● Offline");
                 label.setForeground(online ? Theme.ONLINE : Theme.MUTED);
                 label.setToolTipText("Trạng thái TCP · " + Values.time(of("createdAt", asOf)));
+                found = true;
             } else if (c instanceof Container child) {
-                updatePresence(child, userId, online, asOf);
+                found |= updatePresence(child, userId, online, asOf);
             }
         }
+        return found;
+    }
+
+    private JLabel presenceLabel(long userId, boolean online) {
+        JLabel label = label(online ? "● Đang online" : "● Offline", false);
+        label.putClientProperty("presenceUserId", userId);
+        label.setForeground(online ? Theme.ONLINE : Theme.MUTED);
+        return label;
     }
 
     private JComponent userCard(Map<String, Object> user) {
         JPanel c = card();
         long uid = id(user, "user");
-        c.add(horizontal(avatar(user, 40), button(name(user), () -> showProfile(uid)), label("@" + str(user, "username"), false)), BorderLayout.NORTH);
+        JLabel presence = presenceLabel(uid, bool(user, "online"));
+        c.add(horizontal(avatar(user, 40), button(name(user), () -> showProfile(uid)), label("@" + str(user, "username"), false), presence), BorderLayout.NORTH);
         c.add(readable(str(user, "bio")));
         c.add(horizontal(
-                primary("Gửi lời mời kết bạn 🤝", () -> mutate("FRIEND_REQUEST", of("targetUserId", uid), null, r -> info("Đã gửi lời mời kết bạn thành công!"))),
-                button("Nhắn tin 💬", () -> openDirect(uid))
+                primary("Nhắn tin 💬", () -> openDirect(uid)),
+                button("Gửi lời mời kết bạn 🤝", () -> mutate("FRIEND_REQUEST", of("targetUserId", uid), null, r -> info("Đã gửi lời mời kết bạn thành công!")))
         ), BorderLayout.SOUTH);
         return c;
     }
@@ -1780,6 +1796,7 @@ public final class SocialWindow extends JFrame {
                     : ModernUI.badge("UNICAST · CÁ NHÂN", new Color(49, 46, 129), Color.WHITE);
 
             JPanel top = horizontal(typeBadge, label(name(conv), true));
+            if (!isGroup) top.add(presenceLabel(num(conv, "otherUserId"), bool(conv, "online")));
             c.add(top, BorderLayout.NORTH);
 
             String preview = str(conv, "latestPreview", "preview");
@@ -1975,6 +1992,15 @@ public final class SocialWindow extends JFrame {
         typingLabel.setForeground(Theme.INFO);
 
         subheader.add(badgeMode, BorderLayout.WEST);
+        if (!isGroup) {
+            subheader.add(presenceLabel(num(conv, "otherUserId"), bool(conv, "online")), BorderLayout.CENTER);
+            long other = num(conv, "otherUserId");
+            query("PRESENCE_GET", of("userIds", List.of(other)), r -> {
+                if (activeConversation != cid) return;
+                for (Map<String, Object> state : rows(r.get("items")))
+                    updatePresence(subheader, num(state, "userId"), bool(state, "online"), num(state, "asOf"));
+            });
+        }
         subheader.add(typingLabel, BorderLayout.EAST);
         heading.add(subheader, BorderLayout.SOUTH);
         panel.add(heading, BorderLayout.NORTH);
