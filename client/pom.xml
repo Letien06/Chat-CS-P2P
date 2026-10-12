@@ -12,6 +12,11 @@
     <name>P2P Chat Swing Client</name>
     <dependencies>
         <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.p2pchat</groupId>
             <artifactId>common</artifactId>
             <version>${project.version}</version>

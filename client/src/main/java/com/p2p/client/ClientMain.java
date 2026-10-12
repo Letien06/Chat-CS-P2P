@@ -1,6 +1,6 @@
 package com.p2p.client;
 
-import com.p2p.client.ui.LoginFrame;
+import com.p2p.client.ui.social.SocialWindow;
 import com.p2p.client.ui.Theme;
 import com.formdev.flatlaf.FlatDarkLaf;
 import javax.swing.SwingUtilities;
@@ -26,7 +26,7 @@ public final class ClientMain {
         UIManager.put("ToolTip.background", Theme.FILE_CARD);
         UIManager.put("ToolTip.foreground", Theme.TEXT);
         SwingUtilities.invokeLater(() -> {
-            new LoginFrame().setVisible(true);
+            new SocialWindow().setVisible(true);
         });
     }
 }

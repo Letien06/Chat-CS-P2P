@@ -1,54 +1,15 @@
-# P2P Chat Server
+# Server mạng xã hội v2
 
-Đây là module server của dự án chat và truyền file. Server cung cấp kênh TCP để người dùng tham gia bằng tên, quản lý trạng thái online, chat cá nhân/nhóm và chuyển tiếp file theo các chunk Base64 giữa hai client.
+Entry point của JAR là `com.p2p.server.social.SocialServer`. Từ thư mục gốc, khởi tạo TLS bằng `scripts/init-local.ps1`, rồi chạy `scripts/run-server.ps1`. `--no-ui` chạy không dashboard; `--create-admin` tạo admin bằng `SOCIAL_ADMIN_USERNAME` và `SOCIAL_ADMIN_PASSWORD` rồi thoát.
 
-## Yêu cầu
+Cấu hình tại `server/config/social.properties`. Đường dẫn dữ liệu/keystore tương đối với `app.root` tính từ vị trí file cấu hình. Database v2 riêng `data/social-network.db`; không tự nhận tài khoản từ DB MiniChat cũ.
 
-- JDK 17+
-- Maven 3.9+
-- Hai máy cùng mạng LAN/Wi-Fi khi chạy demo
+TCP/TLS phục vụ request/response/event có length prefix và correlation ID. Server giới hạn mọi socket, thời hạn handshake/auth/heartbeat và outbound queue. UDP discovery 5001 và typing 5002 có HMAC khóa phiên, replay protection và recheck thành viên. UDP không ghi nghiệp vụ bền vững.
 
-## Chạy từ source
+`SocialService` kiểm tra quyền và thực hiện transaction; `SocialDatabase` có một writer và hai reader, WAL/FULL, migrations và indexes. Domain events được ghi outbox cùng mutation. `MediaService` quản lý quota, transfer, SHA-256, chunk/ACK/resume, thumbnail và ACL khi tải. Filesystem không nằm trong SQLite transaction; commit/recovery có state và ID ổn định cho retry.
 
-Từ thư mục `chat_message`:
+Để backup/restore/seed, dừng server và dùng các script từ thư mục gốc. `ApplicationLock` ngăn tool và server cùng mở dữ liệu đang vận hành. Server đóng socket và worker trước database; logs không ghi password hay nội dung chat.
 
-```bash
-mvn clean package
-java -jar server/target/server-1.0.0-SNAPSHOT-shaded.jar server/config/server.properties
-```
+Chi tiết chạy LAN, phân phối truststore và tạo bản release nằm tại [README gốc](../README.md). Hợp đồng giao thức ở [docs/05-protocol-v2.md](../docs/05-protocol-v2.md), bằng chứng thực tế ở [docs/implementation-status.md](../docs/implementation-status.md).
 
-Maven Shade Plugin cũng tạo một file `server-1.0.0-SNAPSHOT-shaded.jar`; có thể dùng file này nếu muốn chạy độc lập.
-
-Nếu không truyền đường dẫn cấu hình, server dùng mặc định `config/server.properties` trong thư mục hiện tại.
-
-## Cấu hình
-
-File mẫu nằm tại `server/config/server.properties`. Khi chạy từ module server, có thể dùng:
-
-```bash
-cd server
-java -jar target/server-1.0.0-SNAPSHOT-shaded.jar config/server.properties
-```
-
-Server tự tạo thư mục `data` và database SQLite khi khởi động.
-
-## Kết nối từ máy khác hoặc máy ảo Linux
-
-Client phải dùng địa chỉ IP LAN của máy chạy server, ví dụ `192.168.1.10:5000`, không dùng `localhost`. Nếu firewall chặn TCP port 5000, cần tạo rule cho port này trước khi demo.
-
-Server dùng `new ServerSocket(5000)` nên lắng nghe trên mọi interface mạng của
-máy chạy server. Khi VM và server cùng nằm trên một laptop, nên bật thêm
-**Host-only Adapter** và dùng IP Host-only của Windows, thường là
-`192.168.56.1`. Nếu muốn VM nằm trực tiếp trong cùng mạng Wi-Fi, có thể dùng
-**Bridged Adapter**. Trên Linux, chạy client bằng:
-
-```bash
-./scripts/run-client.sh
-```
-
-Sau đó nhập IP của máy chạy server vào ô **IP Server**. Không nhập `127.0.0.1`
-trừ khi server cũng chạy bên trong chính máy ảo Linux đó.
-
-## Giao thức
-
-Mỗi message là JSON UTF-8 có frame `[4 byte độ dài][JSON]`. Các loại message được định nghĩa trong module `common`.
+Source `ServerMain`, `ClientHandler`, `ChatDatabase` cũ thuộc MiniChat v1, được giữ làm nền lịch sử và có kiểm thử tương thích riêng.

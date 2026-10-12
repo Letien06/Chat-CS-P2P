@@ -8,3 +8,9 @@ logs/
 *.iml
 .m2-local/
 downloads/
+config/tls/
+*.p12
+*.part
+release/
+.tmp/
+backups/

@@ -1,444 +1,115 @@
-# MiniChat - Client-Server Chat
+# Kết Nối — Mạng xã hội Java Desktop
 
-Ứng dụng chat Java chạy trong mạng LAN, gồm một server TCP và nhiều client
-Windows/Linux. Người dùng chỉ cần nhập tên hiển thị và IP server, không cần đăng
-ký tài khoản hoặc mật khẩu.
+Ứng dụng mạng xã hội quy mô lớp học/LAN, phát triển từ bài tập MiniChat. Bản chạy mặc định dùng **Java 17, Swing/FlatLaf, Client–Server, TCP/TLS, UDP và SQLite**. Mọi dữ liệu và quyền truy cập được quyết định tại server.
 
-## Chức năng
+Đã có tài khoản, hồ sơ/avatar, tìm người/kết bạn/chặn, bài viết có privacy, bảng tin, thích/bình luận, thông báo, chat riêng/nhóm, Broadcast tới tất cả client đang online, lịch sử offline và receipt, truyền file có checksum/resume, báo cáo và quản trị. Đối chiếu triển khai và bằng chứng kiểm thử trong [docs/implementation-status.md](docs/implementation-status.md). Các tài liệu [plan.md](plan.md) và `docs/01` đến `docs/08` giữ đặc tả nghiệp vụ để tiếp tục phát triển.
 
-- Nhiều client kết nối cùng lúc.
-- Hiển thị danh sách người dùng online.
-- Chat riêng giữa hai client.
-- Gửi và nhận file qua server (client không kết nối trực tiếp với nhau).
-- Dashboard Swing hiển thị port, database, client đang kết nối và log server.
-- Chạy trên Windows và Linux với Java 17+.
-- Server dùng port TCP `5000` và lắng nghe trên mọi network interface.
+## Chạy trên Windows
 
-## Cấu trúc project
+Hướng dẫn server Windows + một client local + client máy ảo (Windows/Linux), đồng bộ Git và TLS LAN: [docs/09-run-windows-vm.md](docs/09-run-windows-vm.md).
 
-```text
-chat_message/
-├── common/                 Protocol và codec dùng chung
-├── server/                 TCP server và SQLite database
-├── client/                 Giao diện Java Swing
-├── scripts/                Script build/chạy Windows và Linux
-├── downloads/              File client nhận được
-└── pom.xml                 Maven project gốc
-```
-
-## Yêu cầu
-
-- JDK 17 trở lên.
-- Maven 3.9+ nếu muốn build lại source.
-- Các máy phải nhìn thấy IP của máy chạy server.
-- TCP port `5000` không bị firewall chặn.
-
-Kiểm tra Java trên Windows:
+Cần JDK 17+; Maven 3.9+ để build. Mở PowerShell tại thư mục này:
 
 ```powershell
-java -version
-javac -version
-```
-
-Kiểm tra Java trên Linux:
-
-```bash
-java -version
-javac -version
-```
-
-## Build trên Windows
-
-Mở PowerShell tại thư mục `chat_message`:
-
-```powershell
-cd "D:\duong-dan-den\chat_message"
 .\scripts\build-all.ps1
-```
-
-Nếu Maven đã có trong `PATH`:
-
-```powershell
-mvn clean test
-mvn clean package
-```
-
-Script `build-all.ps1` tự tìm Maven đi kèm IntelliJ IDEA nếu máy chưa có `mvn`
-trong `PATH`.
-
-Sau khi build thành công, hai file chạy chính là:
-
-```text
-server/target/server-1.0.0-SNAPSHOT-shaded.jar
-client/target/client-1.0.0-SNAPSHOT-shaded.jar
-```
-
-## Build trên Linux
-
-Cài Java và Maven trên Ubuntu/Debian:
-
-```bash
-sudo apt update
-sudo apt install -y openjdk-17-jdk maven
-```
-
-Build project:
-
-```bash
-cd ~/chat_message
-chmod +x scripts/*.sh
-./scripts/build-all.sh
-```
-
-Hoặc:
-
-```bash
-mvn clean test
-mvn clean package
-```
-
-## Chạy server trên Windows
-
-Mở PowerShell tại thư mục project:
-
-```powershell
-cd "D:\duong-dan-den\chat_message"
+.\scripts\init-local.ps1
 .\scripts\run-server.ps1
 ```
 
-Hoặc chạy JAR trực tiếp:
-
-```powershell
-java -jar server\target\server-1.0.0-SNAPSHOT-shaded.jar server\config\server.properties
-```
-
-Khi thành công, terminal hiển thị:
-
-```text
-MiniChat server listening on port 5000
-```
-
-Server cũng tự mở cửa sổ **MiniChat Server**. Dashboard hiển thị port TCP,
-database, số client online, tên/client address và các request đang chạy.
-
-Nếu chạy server trên Linux không có giao diện đồ họa hoặc chỉ muốn chạy nền:
-
-```bash
-java -jar server/target/server-1.0.0-SNAPSHOT-shaded.jar \
-  server/config/server.properties --no-ui
-```
-
-Trong chế độ này, thông tin server vẫn được ghi ra terminal/log như bình thường.
-
-Không đóng terminal server trong lúc các client đang chat.
-
-## Chạy server trên Linux
-
-```bash
-cd ~/chat_message
-chmod +x scripts/run-server.sh
-./scripts/run-server.sh
-```
-
-Hoặc:
-
-```bash
-java -jar server/target/server-1.0.0-SNAPSHOT-shaded.jar server/config/server.properties
-```
-
-## Chạy client trên Windows
-
-Mở một PowerShell mới cho mỗi client:
-
-```powershell
-cd "D:\duong-dan-den\chat_message"
-.\scripts\run-client.ps1
-```
-
-Hoặc:
-
-```powershell
-java -jar client\target\client-1.0.0-SNAPSHOT-shaded.jar
-```
-
-Muốn thử nhiều người trên cùng một máy Windows, chạy lệnh client nhiều lần.
-Mỗi cửa sổ nhập một tên khác nhau.
-
-## Chạy client trên Linux
-
-```bash
-cd ~/chat_message
-chmod +x scripts/run-client.sh
-./scripts/run-client.sh
-```
-
-Hoặc:
-
-```bash
-java -jar client/target/client-1.0.0-SNAPSHOT-shaded.jar
-```
-
-Nếu Linux báo không mở được giao diện, kiểm tra máy có desktop environment và
-biến `DISPLAY`:
-
-```bash
-echo $DISPLAY
-```
-
-## Chọn IP server
-
-### Server và client trên cùng máy
-
-Nhập:
-
-```text
-127.0.0.1
-```
-
-### Client ở máy Windows khác trong cùng Wi-Fi
-
-Trên máy chạy server, tìm IPv4:
-
-```powershell
-ipconfig
-```
-
-Tìm dòng `IPv4 Address` của Wi-Fi hoặc Ethernet. Ví dụ:
-
-```text
-192.168.1.3
-```
-
-Các client ở máy khác nhập IP này vào ô **IP Server**.
-
-### Client Linux trong VirtualBox
-
-Cấu hình ổn định để demo trên cùng laptop:
-
-1. Tắt máy ảo Linux.
-2. Mở VirtualBox, chọn máy ảo và vào **Settings > Network**.
-3. Giữ **Adapter 1** ở chế độ **NAT** để Linux có Internet.
-4. Bật **Adapter 2**.
-5. Chọn **Attached to: Host-only Adapter**.
-6. Khởi động lại máy ảo.
-
-Trên Windows, xem IP của VirtualBox Host-only Adapter:
-
-```powershell
-ipconfig
-```
-
-Thông thường IP này là:
-
-```text
-192.168.56.1
-```
-
-Client Linux nhập `192.168.56.1` vào ô **IP Server**.
-
-Kiểm tra từ Linux VM:
-
-```bash
-ping -c 4 192.168.56.1
-```
-
-Kiểm tra port server từ Linux:
-
-```bash
-nc -vz 192.168.56.1 5000
-```
-
-Nếu chưa có `nc`:
-
-```bash
-sudo apt update
-sudo apt install -y netcat-openbsd
-```
-
-Sau đó chạy client Linux:
-
-```bash
-cd ~/chat_message
-./scripts/run-client.sh
-```
-
-### Dùng Bridged Adapter
-
-Có thể chọn **Bridged Adapter** nếu muốn Linux VM xuất hiện như một máy riêng
-trong cùng mạng Wi-Fi. Trong Linux, lấy IP bằng:
-
-```bash
-ip addr
-```
-
-Khi dùng Bridged, client Linux vẫn nhập IP Wi-Fi/Ethernet của máy chạy server,
-ví dụ `192.168.1.3`.
-
-## Kịch bản demo đề xuất
-
-1. Build project trên Windows.
-2. Chạy server Windows:
-
-```powershell
-.\scripts\run-server.ps1
-```
-
-3. Chạy hai client Windows, mỗi client ở một PowerShell:
+Trong cửa sổ PowerShell khác:
 
 ```powershell
 .\scripts\run-client.ps1
 ```
 
-4. Client Windows nhập các tên khác nhau, ví dụ `Windows-A` và `Windows-B`, IP:
+Client dùng `localhost:5000`. Bấm **Tạo tài khoản**, rồi đăng nhập. Có thể mở nhiều cửa sổ client và dùng các tài khoản khác nhau; mỗi tài khoản có một phiên hoạt động. Server có dashboard và có thể chạy không giao diện bằng `run-server.ps1 --no-ui`.
 
-```text
-127.0.0.1
+`init-local.ps1` tạo chứng chỉ tự ký cho demo local, truststore và mật khẩu ngẫu nhiên tại `config/tls/password.local`. Các script chạy tự đọc mật khẩu trên cùng máy. Script không ghi đè chứng chỉ đã có. Không đưa `server.p12`, `password.local` hoặc dữ liệu thật vào source/release.
+
+Build offline khi đã có Maven cache:
+
+```powershell
+mvn -Dmaven.repo.local=.m2-local -o package
 ```
 
-5. Trong Linux VM chạy:
+Nếu Maven chưa có trong PATH, `build-all.ps1` tìm bản bundled của IntelliJ. Build chạy kiểm thử cả ba module, gồm bài kiểm tra tải, nên mất lâu hơn chỉ compile.
+
+## Dữ liệu demo và admin
+
+Dừng server trước khi seed. Seed yêu cầu database mới/chưa có user và không thay dữ liệu đang dùng:
+
+```powershell
+$env:SOCIAL_DEMO_PASSWORD = 'Demo-Password-123!'
+.\scripts\seed-demo.ps1
+.\scripts\run-server.ps1
+```
+
+Có sáu tài khoản giả lập: `demo_admin`, `demo_alice`, `demo_bob`, `demo_carol`, `demo_dave`, `demo_eve`. Tất cả dùng mật khẩu bạn vừa đặt, có sẵn bạn bè, bài viết, nhóm và tệp mẫu. Chỉ dùng mật khẩu ví dụ cho dữ liệu demo.
+
+Tạo admin cho database riêng mà không seed:
+
+```powershell
+$env:SOCIAL_ADMIN_USERNAME = 'admin_class'
+$env:SOCIAL_ADMIN_PASSWORD = 'Replace-With-Your-Password!'
+.\scripts\run-server.ps1 --create-admin
+.\scripts\run-server.ps1
+```
+
+Không tự cấp quyền admin cho tài khoản đăng ký thông thường.
+
+## Chạy qua LAN hoặc Linux
+
+Địa chỉ client nhập phải nằm trong SAN của chứng chỉ. Trước lần khởi tạo đầu tiên, ví dụ máy server dùng `192.168.1.15`:
+
+```powershell
+.\scripts\init-local.ps1 -LanHost '192.168.1.15'
+```
+
+Máy client nhận **chỉ** `config/tls/truststore.p12` qua kênh tin cậy và mật khẩu truststore. Nhập IP server, chọn truststore và nhập mật khẩu ở màn hình đăng nhập, hoặc đặt `SOCIAL_TRUSTSTORE_PASSWORD`. Nếu SAN/hostname hoặc truststore không khớp, TLS từ chối kết nối.
+
+Mở cổng theo cấu hình trên mạng Private: TCP `5000`, UDP discovery `5001`, UDP typing `5002`. UDP bị chặn vẫn dùng được ứng dụng bằng IP nhập tay; typing/discovery không làm mất chat đã lưu. Không tự thay firewall trong script.
+
+Trên Linux có Java 17 và desktop environment:
 
 ```bash
-cd ~/chat_message
-./scripts/run-client.sh
+export SOCIAL_TRUSTSTORE_PASSWORD='your-truststore-password'
+bash scripts/run-client.sh
 ```
 
-6. Client Linux nhập tên `Linux-VM` và IP Host-only của Windows:
+Server Linux dùng `SOCIAL_TLS_PASSWORD`, `bash scripts/run-server.sh --no-ui`; tạo chứng chỉ bằng `scripts/setup-tls.sh` trước. Source Java và script Linux được cung cấp; kết quả chạy thực tế trên Windows, Linux và nhiều máy được ghi riêng trong tài liệu kiểm thử, không suy từ compile.
+
+## Backup và restore
+
+Dừng server; khóa vận hành sẽ từ chối backup/restore khi database đang được server sử dụng. Backup gồm database, media và manifest SHA-256; không chứa mật khẩu/chứng chỉ TLS.
+
+```powershell
+.\scripts\backup-data.ps1 -Destination 'backups/demo-20261007'
+.\scripts\restore-data.ps1 -Backup 'backups/demo-20261007' -NewDataRoot 'data-restored'
+```
+
+Đích backup/restore phải chưa tồn tại. Sau restore, chỉnh `database.path=data-restored/social-network.db`, `storage.root=data-restored/media` trong `server/config/social.properties` trước khi khởi động. Tool kiểm tra checksum, SQLite integrity và foreign keys. Giữ bản dữ liệu gốc cho đến khi xác minh bản phục hồi.
+
+## Đóng gói
+
+```powershell
+.\scripts\package-release.ps1
+```
+
+Thư mục `release/social-v2-...` có hai JAR, cấu hình, script, tài liệu, source và `checksums.sha256`. Gói mặc định không chứa private key, truststore, mật khẩu, database, upload hay Maven cache. Khởi tạo TLS tại máy server đích; phân phối truststore cho máy client sau đó. `-IncludeClientTruststore` chỉ dùng khi muốn kèm truststore công khai đã có cho client.
+
+## Cấu trúc và vận hành
 
 ```text
-192.168.56.1
+common/                         Frame v2, JSON, TLS, UDP HMAC
+server/.../social/              Domain, SQLite, TCP/TLS runtime, media
+server/.../network/social/      UDP và dashboard
+server/.../ops/                 Seed, backup/restore, khóa vận hành
+client/.../network/social/      Async request/event và UDP
+client/.../ui/social/           Giao diện, truyền file, thumbnail cache
+server/config/social.properties Cổng, database, storage, quota
+scripts/                        Build/chạy/TLS/backup/release
 ```
 
-7. Chọn từng người trong danh sách online để chat và gửi file qua lại. Cả tin
-   nhắn và file đều đi theo luồng `Client A -> Server -> Client B`.
+Database mới là `data/social-network.db`, media trong `data/media`, log xoay vòng tại `logs`. DB MiniChat cũ không tự chuyển thành tài khoản v2. Mạng xã hội dùng giao thức v2; [docs/protocol.md](docs/protocol.md) chỉ mô tả bài tập MiniChat trước đây. Source legacy vẫn còn để tham khảo, không phải entry point của JAR mặc định.
 
-## Mở Windows Firewall cho port 5000
-
-Có thể chọn **Allow access** nếu Windows hỏi quyền mạng khi chạy Java. Nếu vẫn
-bị chặn, mở PowerShell bằng quyền Administrator và chạy:
-
-```powershell
-New-NetFirewallRule `
-  -DisplayName "MiniChat TCP 5000" `
-  -Direction Inbound `
-  -Protocol TCP `
-  -LocalPort 5000 `
-  -Action Allow `
-  -Profile Private
-```
-
-Kiểm tra server có đang lắng nghe:
-
-```powershell
-netstat -ano | findstr :5000
-```
-
-Kết quả đúng có dạng:
-
-```text
-TCP    0.0.0.0:5000    0.0.0.0:0    LISTENING
-```
-
-Xóa rule firewall nếu không còn cần:
-
-```powershell
-Remove-NetFirewallRule -DisplayName "MiniChat TCP 5000"
-```
-
-## Chỉ gửi file JAR cho bạn bè
-
-Nếu không muốn gửi toàn bộ source, gửi các file sau và giữ đúng cấu trúc:
-
-```text
-MiniChat/
-├── client-1.0.0-SNAPSHOT-shaded.jar
-├── server-1.0.0-SNAPSHOT-shaded.jar
-└── server.properties
-```
-
-Chạy server Windows trong thư mục chứa các file:
-
-```powershell
-java -jar .\server-1.0.0-SNAPSHOT-shaded.jar .\server.properties
-```
-
-Chạy client Windows:
-
-```powershell
-java -jar .\client-1.0.0-SNAPSHOT-shaded.jar
-```
-
-Chạy client Linux:
-
-```bash
-java -jar ./client-1.0.0-SNAPSHOT-shaded.jar
-```
-
-File `server.properties` mẫu:
-
-```properties
-server.port=5000
-database.path=data/p2p-chat.db
-max.clients=100
-max.file.size=2147483648
-```
-
-## Lỗi thường gặp
-
-### `java` không được nhận diện
-
-Cài JDK 17 và mở lại terminal, sau đó kiểm tra:
-
-```bash
-java -version
-```
-
-### `mvn` không được nhận diện trên Windows
-
-Dùng script tự tìm Maven của IntelliJ:
-
-```powershell
-.\scripts\build-all.ps1
-```
-
-### Client báo không kết nối được server
-
-Kiểm tra lần lượt:
-
-```text
-1. Server vẫn đang chạy.
-2. IP Server nhập đúng.
-3. Client không dùng 127.0.0.1 khi server nằm trên máy khác.
-4. Port TCP 5000 không bị firewall chặn.
-5. Linux VM ping được IP Windows.
-6. Hai client không nhập trùng tên đang online.
-```
-
-Trên Windows kiểm tra port:
-
-```powershell
-Test-NetConnection 192.168.1.3 -Port 5000
-```
-
-Trên Linux kiểm tra port:
-
-```bash
-nc -vz 192.168.56.1 5000
-```
-
-### Không gửi hoặc nhận được file
-
-- Giữ server hoạt động trong suốt quá trình truyền.
-- Không đóng client khi file đang truyền.
-- Kiểm tra quyền ghi thư mục `downloads`.
-- File nhận được lưu tại thư mục `downloads` tính từ nơi chạy client.
-
-## Dừng chương trình
-
-- Đóng cửa sổ client để ngắt client.
-- Trong terminal server nhấn `Ctrl+C` để dừng server.
-
-## Tài liệu thêm
-
-- `server/README.md`: thông tin module server.
-- `client/README.md`: thông tin giao diện client.
-- `docs/protocol.md`: giao thức message giữa client và server.
+Giới hạn mặc định: 50 kết nối kể cả chưa xác thực; ảnh 5 MiB và 20 megapixel; attachment 25 MiB; quota 200 MiB/user, 10 GiB/server. Có giới hạn thao tác, hàng đợi, timeout và kiểm tra privacy ở cả tải media/event. Xem [giao thức](docs/05-protocol-v2.md), [nghiệp vụ](docs/02-business-rules.md), [kiểm thử và demo](docs/08-testing-release.md).

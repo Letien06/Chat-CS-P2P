@@ -61,7 +61,7 @@
                             <shadedClassifierName>shaded</shadedClassifierName>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.p2p.server.ServerMain</mainClass>
+                                    <mainClass>com.p2p.server.social.SocialServer</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>
