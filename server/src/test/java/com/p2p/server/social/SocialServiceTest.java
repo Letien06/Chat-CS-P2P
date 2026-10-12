@@ -36,6 +36,38 @@ class SocialServiceTest {
         assertCode("INVALID_REQUEST",()->call(a,"PROFILE_UPDATE",Map.of("displayName","A","bio","","expectedVersion",1,"role","ADMIN")));
         assertCode("ACTION_FORBIDDEN",()->call(a,"ADMIN_REPORT_LIST",Map.of()));
     }
+    @Test void groupCreationInvitesSelectedFriendsAtomicallyAndReplayDoesNotDuplicate()throws Exception {
+        friends();
+        Map<String,Object> relation=call(a,"FRIEND_REQUEST",Map.of("targetUserId",c));
+        call(c,"FRIEND_ACCEPT",Map.of("relationId",relation.get("relationId"),"expectedVersion",1));
+        String key=UUID.randomUUID().toString();
+        Map<String,Object> payload=Map.of("title","Study group","inviteeIds",List.of(b,c));
+        Map<String,Object> created=service.execute(a,"GROUP_CREATE",payload,key);
+        long group=((Number)created.get("conversationId")).longValue();
+        assertEquals(2L,created.get("invitedCount"));
+        for(long user:List.of(b,c)) {
+            List<?> invites=(List<?>)call(user,"GROUP_INVITE_LIST",Map.of()).get("items");
+            assertEquals(1,invites.size());
+            Map<?,?> invite=(Map<?,?>)invites.get(0);
+            assertEquals(group,((Number)invite.get("conversationId")).longValue());
+            assertEquals("PENDING",invite.get("status"));
+            assertCode("NOT_FOUND",()->call(user,"GROUP_MEMBERS_GET",Map.of("conversationId",group)));
+            call(user,"GROUP_INVITE_ACCEPT",Map.of("inviteId",invite.get("id")));
+        }
+        assertEquals(3,((List<?>)call(a,"GROUP_MEMBERS_GET",Map.of("conversationId",group)).get("items")).size());
+        assertEquals(group,((Number)service.execute(a,"GROUP_CREATE",payload,key).get("conversationId")).longValue());
+        assertEquals(2L,((Number)db.read(conn->SocialService.one(conn,"SELECT count(*) n FROM group_invites WHERE conversation_id=?",group).get("n"))).longValue());
+    }
+    @Test void invalidGroupSelectionDoesNotCreateGroupOrInvites()throws Exception {
+        friends();
+        assertCode("FRIENDSHIP_REQUIRED",()->call(a,"GROUP_CREATE",Map.of("title","Invalid","inviteeIds",List.of(b,c))));
+        assertCode("INVALID_REQUEST",()->call(a,"GROUP_CREATE",Map.of("title","Invalid","inviteeIds",List.of(b,b))));
+        assertCode("INVALID_REQUEST",()->call(a,"GROUP_CREATE",Map.of("title","Invalid","inviteeIds",List.of(a))));
+        assertCode("INVALID_REQUEST",()->call(a,"GROUP_CREATE",Map.of("title","Invalid","inviteeIds",List.of())));
+        assertCode("QUOTA_EXCEEDED",()->call(a,"GROUP_CREATE",Map.of("title","Invalid","inviteeIds",Collections.nCopies(20,b))));
+        assertEquals(0L,((Number)db.read(conn->SocialService.one(conn,"SELECT count(*) n FROM conversations WHERE kind='GROUP'").get("n"))).longValue());
+        assertEquals(0L,((Number)db.read(conn->SocialService.one(conn,"SELECT count(*) n FROM group_invites").get("n"))).longValue());
+    }
     @Test void friendRaceAndStaleRequest()throws Exception {
         Map<String,Object> r=call(a,"FRIEND_REQUEST",Map.of("targetUserId",b));
         assertCode("INCOMING_REQUEST_EXISTS",()->call(b,"FRIEND_REQUEST",Map.of("targetUserId",a)));

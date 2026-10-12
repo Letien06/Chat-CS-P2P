@@ -1,6 +1,6 @@
 # Kết Nối — Mạng xã hội Java Desktop
 
-Ứng dụng mạng xã hội quy mô lớp học/LAN, phát triển từ bài tập MiniChat. Bản chạy mặc định dùng **Java 17, Swing/FlatLaf, Client–Server, TCP/IP và SQLite**. Client nhập IP/hostname, TCP port, tài khoản và mật khẩu trên form đăng nhập.
+Ứng dụng mạng xã hội quy mô lớp học/LAN, phát triển từ bài tập MiniChat. Bản chạy mặc định dùng **Java 17, Swing/FlatLaf, Client–Server, TCP/IP và SQLite**. Client nhập địa chỉ IP máy chủ, TCP port, tài khoản và mật khẩu trên form đăng nhập.
 
 Đã có tài khoản, hồ sơ/avatar, tìm người/kết bạn/chặn, bài viết có privacy, bảng tin, thích/bình luận, thông báo, chat riêng/nhóm, Broadcast tới tất cả client đang online, lịch sử offline và receipt, truyền file có checksum/resume, báo cáo và quản trị. Đối chiếu triển khai và bằng chứng kiểm thử trong [docs/implementation-status.md](docs/implementation-status.md). Các tài liệu [plan.md](plan.md) và `docs/01` đến `docs/08` giữ đặc tả nghiệp vụ để tiếp tục phát triển.
 
@@ -21,9 +21,9 @@ Trong cửa sổ PowerShell khác:
 .\scripts\run-client.ps1
 ```
 
-Client dùng `localhost:5000`. Bấm **Tạo tài khoản**, rồi đăng nhập. Có thể mở nhiều cửa sổ client và dùng các tài khoản khác nhau; mỗi tài khoản có một phiên hoạt động. Server có dashboard và có thể chạy không giao diện bằng `run-server.ps1 --no-ui`.
+Client dùng `127.0.0.1:5000` khi server ở cùng máy. Bấm **Tạo tài khoản**, rồi đăng nhập. Có thể mở nhiều cửa sổ client và dùng các tài khoản khác nhau; mỗi tài khoản có một phiên hoạt động. Server có dashboard và có thể chạy không giao diện bằng `run-server.ps1 --no-ui`.
 
-Server mở TCP port 5000; client nhập IP và port trên form.
+Server mở TCP port 5000; client nhập địa chỉ IP máy chủ và port trên form.
 
 Build offline khi đã có Maven cache:
 

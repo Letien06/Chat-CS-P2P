@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-host="${1:-${SOCIAL_SERVER_HOST:-localhost}}"
+host="${1:-${SOCIAL_SERVER_HOST:-127.0.0.1}}"
 port="${2:-${SOCIAL_SERVER_PORT:-5000}}"
 jar='client/target/client-1.0.0-SNAPSHOT-shaded.jar'
 [[ -f "$jar" ]] || { echo 'Missing client JAR. Run bash scripts/build-all.sh first.' >&2; exit 1; }

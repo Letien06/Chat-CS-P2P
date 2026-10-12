@@ -95,6 +95,49 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
     public int authenticatedCount() {
         return users.size();
     }
+    private final long startedAt = System.currentTimeMillis();
+    public long startedAt() { return startedAt; }
+    public long uptimeMs() { return System.currentTimeMillis() - startedAt; }
+    public Config config() { return config; }
+
+    public record ClientSnapshot(String id, String remoteAddress, long userId, String username, boolean authenticated, long connectedAt, String status) {}
+
+    public List<ClientSnapshot> clientSnapshots() {
+        List<ClientSnapshot> list = new ArrayList<>();
+        for (Connection c : connections.values()) {
+            String addr = "-";
+            try {
+                if (c.socket != null && c.socket.getRemoteSocketAddress() != null) {
+                    addr = c.socket.getRemoteSocketAddress().toString().replaceFirst("^/", "");
+                }
+            } catch (Exception ignored) {}
+            String status = c.dead.get() ? "Đã đóng" : (c.draining ? "Đang xả" : "Đang hoạt động");
+            list.add(new ClientSnapshot(c.id, addr, c.userId, c.username != null ? c.username : "-", c.userId > 0, c.connectedAt, status));
+        }
+        return list;
+    }
+
+    private static final List<java.util.function.Consumer<LogRecord>> LOG_LISTENERS = new CopyOnWriteArrayList<>();
+    public static void addLogListener(java.util.function.Consumer<LogRecord> listener) {
+        LOG_LISTENERS.add(listener);
+    }
+    public static void removeLogListener(java.util.function.Consumer<LogRecord> listener) {
+        LOG_LISTENERS.remove(listener);
+    }
+
+    static {
+        Handler monitorLogHandler = new Handler() {
+            @Override public void publish(LogRecord record) {
+                for (java.util.function.Consumer<LogRecord> listener : LOG_LISTENERS) {
+                    try { listener.accept(record); } catch (Exception ignored) {}
+                }
+            }
+            @Override public void flush() {}
+            @Override public void close() {}
+        };
+        Logger.getLogger("").addHandler(monitorLogHandler);
+    }
+
     public boolean isClosed() {
         return closed.get();
     }
@@ -203,6 +246,7 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
                     Connection previous=users.get(id);
                     if(previous!=null&&!previous.dead.get())throw new SocialException("ALREADY_SIGNED_IN","Tài khoản đang đăng nhập ở phiên khác");
                     c.userId=id;
+                    c.username=String.valueOf(user.getOrDefault("username", user.getOrDefault("displayName", "")));
                     c.authVersion=((Number)user.get("authVersion")).longValue();
                     users.put(id,c);
                 }
@@ -583,6 +627,8 @@ public final class SocialServer implements AutoCloseable, UdpService.Host {
         final String id=UUID.randomUUID().toString();
         final Socket socket;
         final long created=System.nanoTime();
+        final long connectedAt=System.currentTimeMillis();
+        volatile String username;
         volatile long lastRead=created,userId,authVersion,udpEpoch,drainStarted;
         volatile boolean negotiated,draining;
         final AtomicBoolean dead=new AtomicBoolean(),revoked=new AtomicBoolean();

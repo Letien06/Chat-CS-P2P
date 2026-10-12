@@ -8,7 +8,7 @@ java -jar client/target/client-1.0.0-SNAPSHOT-shaded.jar
 
 PowerShell: `./scripts/run-client.ps1`; Linux: `./scripts/run-client.sh`. Script Linux có sẵn nhưng Linux/VM/DPI chưa được nghiệm thu trực tiếp; xem [bằng chứng và giới hạn kiểm thử](../docs/implementation-status.md).
 
-Nhập IP/hostname server và TCP port (mặc định 5000), tên đăng nhập và mật khẩu. Client kết nối trực tiếp bằng TCP.
+Nhập địa chỉ IP máy chủ và TCP port (mặc định 5000), tên đăng nhập và mật khẩu. Client kết nối trực tiếp bằng TCP.
 
 Đăng ký cần username, tên hiển thị và password 10–128 ký tự; không tự đăng nhập. Client không lưu password. Mất mạng sẽ thử lại TCP theo backoff rồi yêu cầu login lại. Logout xóa state riêng và cache thumbnail trong bộ nhớ.
 

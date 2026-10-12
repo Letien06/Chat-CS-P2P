@@ -5,7 +5,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 if ([string]::IsNullOrWhiteSpace($ServerHost)) { $ServerHost = $env:SOCIAL_SERVER_HOST }
-if ([string]::IsNullOrWhiteSpace($ServerHost)) { $ServerHost = 'localhost' }
+if ([string]::IsNullOrWhiteSpace($ServerHost)) { $ServerHost = '127.0.0.1' }
 if (-not (Test-Path -LiteralPath 'client/target/client-1.0.0-SNAPSHOT-shaded.jar')) {
     throw 'Chưa có client JAR. Chạy scripts/build-all.ps1 trước.'
 }

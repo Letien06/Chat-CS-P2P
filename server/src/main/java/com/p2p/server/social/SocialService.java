@@ -239,7 +239,7 @@ public final class SocialService {
     private static final Set<String>MUTATIONS=new HashSet<>();
     static {
         String[] specs= {
-            "AUTH_PASSWORD_CHANGE:currentPassword,newPassword","PROFILE_GET:targetUserId","PROFILE_UPDATE*:displayName,bio,expectedVersion","AVATAR_SET*:mediaId,expectedVersion","USER_SEARCH:query,cursor,limit","RELATION_LIST:kind,cursor,limit","PRESENCE_GET:userIds","FRIEND_REQUEST*:targetUserId","FRIEND_ACCEPT*:relationId,expectedVersion","FRIEND_REJECT*:relationId,expectedVersion","FRIEND_CANCEL*:relationId,expectedVersion","FRIEND_REMOVE*:relationId","BLOCK_SET*:targetUserId,blocked","BLOCK_LIST:cursor,limit","POST_CREATE*:content,visibility,mediaIds","POST_GET:postId","POST_UPDATE*:postId,content,visibility,expectedVersion","POST_DELETE*:postId,expectedVersion","FEED_GET:cursor,limit","PROFILE_POSTS_GET:authorId,cursor,limit","COMMENT_LIST:postId,cursor,limit","COMMENT_CREATE*:postId,content","COMMENT_DELETE*:commentId","LIKE_SET*:postId,liked","CONVERSATION_DIRECT_GET_OR_CREATE*:targetUserId","CONVERSATION_LIST:cursor,limit","MESSAGE_SEND*:conversationId,clientMessageId,content,mediaId","MESSAGE_HISTORY:conversationId,beforeSeq,afterSeq,limit","MESSAGE_LOOKUP:clientMessageId","MESSAGE_DELIVERED*:conversationId,throughSeq","MESSAGE_READ*:conversationId,throughSeq","GROUP_CREATE*:title","GROUP_INVITE*:conversationId,targetUserId","GROUP_INVITE_LIST:cursor,limit","GROUP_INVITE_ACCEPT*:inviteId","GROUP_INVITE_REJECT*:inviteId","GROUP_INVITE_CANCEL*:inviteId","GROUP_MEMBERS_GET:conversationId,cursor,limit","GROUP_RENAME*:conversationId,expectedVersion,title","GROUP_KICK*:conversationId,expectedVersion,userId","GROUP_OWNER_TRANSFER*:conversationId,expectedVersion,userId","GROUP_LEAVE*:conversationId,expectedVersion","GROUP_DISBAND*:conversationId,expectedVersion","NOTIFICATION_LIST:cursor,limit,unreadOnly","NOTIFICATION_READ*:notificationIds","NOTIFICATION_READ_THROUGH*:throughCursor","NOTIFICATION_COUNT:","REPORT_CREATE*:targetType,targetId,reason,description","ADMIN_REPORT_LIST:filter,cursor,limit","ADMIN_REPORT_GET:reportId","ADMIN_REPORT_CLAIM*:reportId,expectedVersion","ADMIN_REPORT_RESOLVE*:reportId,action,reason,expectedVersion","ADMIN_AUDIT_LIST:cursor,limit,filter","ADMIN_AUDIT_GET:auditId","ADMIN_USER_UNSUSPEND*:targetUserId,reason","ADMIN_GROUP_OWNER_TRANSFER*:conversationId,targetUserId,expectedVersion,reason","ADMIN_GROUP_CLOSE*:conversationId,expectedVersion,reason","STATE_SYNC:conversationsCursor,notificationsCursor,includeConversations,includeNotifications,limit"
+            "AUTH_PASSWORD_CHANGE:currentPassword,newPassword","PROFILE_GET:targetUserId","PROFILE_UPDATE*:displayName,bio,expectedVersion","AVATAR_SET*:mediaId,expectedVersion","USER_SEARCH:query,cursor,limit","RELATION_LIST:kind,cursor,limit","PRESENCE_GET:userIds","FRIEND_REQUEST*:targetUserId","FRIEND_ACCEPT*:relationId,expectedVersion","FRIEND_REJECT*:relationId,expectedVersion","FRIEND_CANCEL*:relationId,expectedVersion","FRIEND_REMOVE*:relationId","BLOCK_SET*:targetUserId,blocked","BLOCK_LIST:cursor,limit","POST_CREATE*:content,visibility,mediaIds","POST_GET:postId","POST_UPDATE*:postId,content,visibility,expectedVersion","POST_DELETE*:postId,expectedVersion","FEED_GET:cursor,limit","PROFILE_POSTS_GET:authorId,cursor,limit","COMMENT_LIST:postId,cursor,limit","COMMENT_CREATE*:postId,content","COMMENT_DELETE*:commentId","LIKE_SET*:postId,liked","CONVERSATION_DIRECT_GET_OR_CREATE*:targetUserId","CONVERSATION_LIST:cursor,limit","MESSAGE_SEND*:conversationId,clientMessageId,content,mediaId","MESSAGE_HISTORY:conversationId,beforeSeq,afterSeq,limit","MESSAGE_LOOKUP:clientMessageId","MESSAGE_DELIVERED*:conversationId,throughSeq","MESSAGE_READ*:conversationId,throughSeq","GROUP_CREATE*:title,inviteeIds","GROUP_INVITE*:conversationId,targetUserId","GROUP_INVITE_LIST:cursor,limit","GROUP_INVITE_ACCEPT*:inviteId","GROUP_INVITE_REJECT*:inviteId","GROUP_INVITE_CANCEL*:inviteId","GROUP_MEMBERS_GET:conversationId,cursor,limit","GROUP_RENAME*:conversationId,expectedVersion,title","GROUP_KICK*:conversationId,expectedVersion,userId","GROUP_OWNER_TRANSFER*:conversationId,expectedVersion,userId","GROUP_LEAVE*:conversationId,expectedVersion","GROUP_DISBAND*:conversationId,expectedVersion","NOTIFICATION_LIST:cursor,limit,unreadOnly","NOTIFICATION_READ*:notificationIds","NOTIFICATION_READ_THROUGH*:throughCursor","NOTIFICATION_COUNT:","REPORT_CREATE*:targetType,targetId,reason,description","ADMIN_REPORT_LIST:filter,cursor,limit","ADMIN_REPORT_GET:reportId","ADMIN_REPORT_CLAIM*:reportId,expectedVersion","ADMIN_REPORT_RESOLVE*:reportId,action,reason,expectedVersion","ADMIN_AUDIT_LIST:cursor,limit,filter","ADMIN_AUDIT_GET:auditId","ADMIN_USER_UNSUSPEND*:targetUserId,reason","ADMIN_GROUP_OWNER_TRANSFER*:conversationId,targetUserId,expectedVersion,reason","ADMIN_GROUP_CLOSE*:conversationId,expectedVersion,reason","STATE_SYNC:conversationsCursor,notificationsCursor,includeConversations,includeNotifications,limit"
         }
         ;
         for(String spec:specs) {
@@ -642,9 +642,22 @@ public final class SocialService {
             }
             case "GROUP_CREATE": {
                 String title=text(p,"title",60,false);
+                List<Long> invitees=new ArrayList<>();
+                if(p.containsKey("inviteeIds")) {
+                    if(!(p.get("inviteeIds") instanceof List<?> list)||list.isEmpty())throw error("INVALID_REQUEST");
+                    if(list.size()>19)throw error("QUOTA_EXCEEDED");
+                    Set<Long> distinct=new HashSet<>();
+                    for(Object raw:list) {
+                        long target=number(map("id",raw),"id");
+                        if(target==0||!distinct.add(target))throw error("INVALID_REQUEST");
+                        friendship(c,a,target);
+                        invitees.add(target);
+                    }
+                }
                 long id=insert(c,"INSERT INTO conversations(kind,title,owner_id,created_at,last_activity_at) VALUES('GROUP',?,?,?,?)",title,a,now(),now());
                 join(c,id,a,"OWNER",1);
-                return map("conversationId",id,"title",title,"version",1);
+                for(long target:invitees)chatDispatch(c,a,"GROUP_INVITE",map("conversationId",id,"targetUserId",target));
+                return map("conversationId",id,"title",title,"version",1,"invitedCount",invitees.size());
             }
             case "GROUP_INVITE": {
                 long id=number(p,"conversationId"),b=number(p,"targetUserId");
