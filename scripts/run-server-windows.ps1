@@ -1,4 +1,4 @@
-param([switch]$NoUi)
+﻿param([switch]$NoUi)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 if (-not (Test-Path -LiteralPath 'server/target/server-1.0.0-SNAPSHOT-shaded.jar')) {

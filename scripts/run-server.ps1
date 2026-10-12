@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 if (-not $env:SOCIAL_TLS_PASSWORD -and (Test-Path -LiteralPath 'config/tls/password.local')) {
     $env:SOCIAL_TLS_PASSWORD = (Get-Content -LiteralPath 'config/tls/password.local' -Raw).Trim()

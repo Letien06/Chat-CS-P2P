@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) { throw 'Cần cài JDK 17+ và thêm java vào PATH.' }
 if (-not $env:SOCIAL_TRUSTSTORE_PASSWORD -and (Test-Path -LiteralPath 'config/tls/password.local')) {

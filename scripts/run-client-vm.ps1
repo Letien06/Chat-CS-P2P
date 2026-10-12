@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ServerHost = '',
     [ValidateRange(1,65535)][int]$ServerPort = 5000,
     [string]$Truststore = 'config/tls/truststore.p12'
