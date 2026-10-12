@@ -121,7 +121,9 @@ Client pending request có deadline 10s thường/60s finalize. Timeout = kết 
 | MESSAGE_LOOKUP | clientMessageId | Tin của sender + kết quả đã commit hoặc NOT_FOUND |
 | MESSAGE_DELIVERED* | conversationId, throughSeq | Cursor recipient tăng đơn điệu |
 | MESSAGE_READ* | conversationId, throughSeq | Read/delivered tăng, seq trong quyền |
-| GROUP_CREATE* | title | Group + actor OWNER |
+| GROUP_CREATE* | title, inviteeIds? | Public group + actor OWNER; optional friend invitations |
+| GROUP_PUBLIC_LIST | cursor, limit | Discoverable active groups, member count and join state |
+| GROUP_JOIN* | conversationId | Join a public group without friendship; max 20 members |
 | GROUP_INVITE* | conversationId, targetUserId | inviteId/expiry; owner/friend |
 | GROUP_INVITE_LIST | cursor, limit | Lời mời actor hoặc owner được phép xem |
 | GROUP_INVITE_ACCEPT/REJECT/CANCEL* | inviteId | Member period hoặc terminal |

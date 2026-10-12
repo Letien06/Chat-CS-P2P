@@ -1795,6 +1795,30 @@ public final class SocialWindow extends JFrame {
             return c;
         }, primary("Tạo nhóm mới 👥", this::createGroup));
 
+        Page publicGroups = new Page("Nhóm công khai · Ai cũng có thể tham gia", "GROUP_PUBLIC_LIST", of(), group -> {
+            JPanel c = card();
+            JLabel badge = ModernUI.badge("🌐 NHÓM CÔNG KHAI", new Color(5, 150, 105), Color.WHITE);
+            c.add(horizontal(badge, label(name(group), true)), BorderLayout.NORTH);
+            String owner = str(group, "ownerName");
+            long members = num(group, "memberCount");
+            c.add(readable("Tạo bởi " + (owner.isBlank() ? "chủ nhóm" : owner) + " · " + members + "/20 thành viên\nAi muốn vào đều có thể tham gia nhóm này."), BorderLayout.CENTER);
+            JPanel actions = horizontal();
+            boolean joined = num(group, "joined") > 0;
+            if (joined) {
+                actions.add(primary("Mở nhóm chat", () -> openChat(group)));
+            } else if (bool(group, "canJoin")) {
+                actions.add(primary("Tham gia nhóm ✔", () -> mutate("GROUP_JOIN", of("conversationId", id(group, "conversation")), null, r -> {
+                    info("Bạn đã tham gia nhóm công khai.");
+                    showConversations();
+                })));
+            } else {
+                actions.add(label("Nhóm đã đủ 20 thành viên", false));
+            }
+            actions.add(label("#" + id(group, "conversation"), false));
+            c.add(actions, BorderLayout.SOUTH);
+            return c;
+        });
+
         Page invites = new Page("Lời mời tham gia nhóm", "GROUP_INVITE_LIST", of(), invite -> {
             JPanel c = card();
             c.add(label(str(invite, "title", "groupTitle") + " · #" + num(invite, "conversationId") + " · " + str(invite, "status"), false), BorderLayout.NORTH);
@@ -1819,30 +1843,32 @@ public final class SocialWindow extends JFrame {
         JTabbedPane tabs = new JTabbedPane();
         tabs.setFont(Theme.font(Font.BOLD, 13));
         tabs.addTab("💬 Cuộc trò chuyện", conversations.panel);
+        tabs.addTab("🌐 Nhóm công khai", publicGroups.panel);
         tabs.addTab("✉️ Lời mời vào nhóm", invites.panel);
         panel.add(tabs, BorderLayout.CENTER);
 
         setView("conversations", panel, this::showConversations);
         conversations.load(true);
+        publicGroups.load(true);
         invites.load(true);
     }
 
     private void createGroup() {
-        JDialog d = dialog("Tạo nhóm mới", 700, 660);
+        JDialog d = dialog("Tạo nhóm công khai", 700, 660);
         d.setMinimumSize(new Dimension(600, 560));
         JPanel panel = new JPanel(new BorderLayout(8, 12));
         panel.setOpaque(false);
         JPanel heading = vertical();
-        heading.add(label("Tạo nhóm trò chuyện", true));
+        heading.add(label("Tạo nhóm công khai", true));
         JTextField title = new JTextField();
         addField(heading, "Tên nhóm (tối đa 60 ký tự)", title);
         JTextField search = new JTextField();
         addField(heading, "Tìm trong danh sách bạn bè đã tải", search);
-        heading.add(readable("Chọn bạn bè trước khi tạo nhóm. Bạn được chọn nhận lời mời và bấm Tham gia nhóm để bắt đầu chat."));
+        heading.add(readable("Nhóm này hiển thị trong danh sách Nhóm công khai. Ai cũng có thể tìm và tham gia; bạn có thể mời thêm bạn bè ngay từ lúc tạo."));
         panel.add(heading, BorderLayout.NORTH);
 
         Map<Long, Map<String, Object>> selected = new LinkedHashMap<>();
-        JLabel count = label("Đã chọn 0 / 19 người bạn", false);
+        JLabel count = label("Đã chọn 0 / 19 người bạn · không bắt buộc", false);
         Page[] friendPage = new Page[1];
         Runnable filter = () -> {
             if (friendPage[0] == null) return;
@@ -1874,7 +1900,7 @@ public final class SocialWindow extends JFrame {
                     }
                     selected.put(friendId, user);
                 } else selected.remove(friendId);
-                count.setText("Đã chọn " + selected.size() + " / 19 người bạn");
+                 count.setText("Đã chọn " + selected.size() + " / 19 người bạn · không bắt buộc");
             });
             JPanel row = card();
             row.add(avatar(user, 38), BorderLayout.WEST);
@@ -1892,12 +1918,12 @@ public final class SocialWindow extends JFrame {
             public void changedUpdate(DocumentEvent e) { filter.run(); }
         });
         panel.add(friends.panel, BorderLayout.CENTER);
-        JButton create = Theme.primaryButton("Tạo nhóm và mời bạn bè");
+        JButton create = Theme.primaryButton("Tạo nhóm công khai");
         create.addActionListener(e -> {
             String groupTitle = title.getText().trim();
             if (groupTitle.isBlank() || groupTitle.length() > 60) { info("Tên nhóm cần từ 1 đến 60 ký tự."); return; }
-            if (selected.isEmpty()) { info("Chọn ít nhất một người bạn để tạo nhóm. Nếu danh sách trống, hãy kết bạn trước."); return; }
-            Map<String, Object> payload = of("title", groupTitle, "inviteeIds", List.copyOf(selected.keySet()));
+            Map<String, Object> payload = of("title", groupTitle);
+            if (!selected.isEmpty()) payload.put("inviteeIds", List.copyOf(selected.keySet()));
             mutate("GROUP_CREATE", payload, create, result -> {
                 d.dispose();
                 Map<String, Object> created = map(result.get("conversation"));
@@ -1954,8 +1980,13 @@ public final class SocialWindow extends JFrame {
         panel.add(heading, BorderLayout.NORTH);
 
         chatMessages = vertical();
+        if (isGroup) {
+            chatMessages.setOpaque(true);
+            chatMessages.setBackground(new Color(243, 244, 246));
+        }
         chatMessages.setBorder(new EmptyBorder(15, 24, 15, 24));
         chatScroll = scroll(chatMessages);
+        if (isGroup) chatScroll.getViewport().setBackground(new Color(243, 244, 246));
         panel.add(chatScroll, BorderLayout.CENTER);
 
         chatInput = text("", 3);
@@ -2066,15 +2097,43 @@ public final class SocialWindow extends JFrame {
         List<Map<String, Object>> sorted = new ArrayList<>(messages.values());
         sorted.sort(Comparator.comparingLong(m -> num(m, "conversationSeq", "seq")));
 
+        boolean groupChat = "GROUP".equals(str(activeConversationData, "kind", "type"));
         for (Map<String, Object> m : sorted) {
             boolean isOwn = num(m, "senderId") == id(currentUser, "user");
+            String sender = str(m, "senderName", "displayName");
+            if (sender.isBlank()) sender = isOwn ? "Bạn" : "Người gửi #" + num(m, "senderId");
+
+            if (groupChat) {
+                JPanel row = new JPanel(new FlowLayout(isOwn ? FlowLayout.RIGHT : FlowLayout.LEFT, 0, 0));
+                row.setOpaque(false);
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                JPanel bubble = new JPanel(new BorderLayout(4, 2));
+                bubble.setBackground(Color.WHITE);
+                bubble.setBorder(BorderFactory.createCompoundBorder(
+                        new LineBorder(new Color(203, 213, 225), 1),
+                        new EmptyBorder(9, 14, 8, 14)));
+                bubble.setMaximumSize(new Dimension(520, Integer.MAX_VALUE));
+                JLabel senderLabel = label(sender, false);
+                senderLabel.setForeground(new Color(51, 65, 85));
+                senderLabel.setFont(Theme.font(Font.BOLD, 12));
+                JTextArea groupContent = readable(str(m, "content"));
+                groupContent.setForeground(new Color(30, 41, 59));
+                JLabel groupMeta = label(time(m), false);
+                groupMeta.setForeground(new Color(100, 116, 139));
+                groupMeta.setFont(Theme.font(Font.PLAIN, 11));
+                bubble.add(senderLabel, BorderLayout.NORTH);
+                bubble.add(groupContent, BorderLayout.CENTER);
+                bubble.add(groupMeta, BorderLayout.SOUTH);
+                row.add(bubble);
+                chatMessages.add(row);
+                chatMessages.add(Box.createVerticalStrut(7));
+                continue;
+            }
+
             JPanel c = card();
             if (isOwn) {
                 c.setBackground(Theme.BUBBLE_OWN);
             }
-
-            String sender = str(m, "senderName", "displayName");
-            if (sender.isBlank()) sender = isOwn ? "Bạn" : "Người gửi #" + num(m, "senderId");
 
             String receipt = "GROUP".equals(str(activeConversationData, "kind", "type"))
                     ? "Đã lưu · " + num(m, "deliveredByCount") + " đã nhận / " + num(m, "readByCount") + " đã đọc"

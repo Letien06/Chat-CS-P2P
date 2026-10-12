@@ -68,6 +68,23 @@ class SocialServiceTest {
         assertEquals(0L,((Number)db.read(conn->SocialService.one(conn,"SELECT count(*) n FROM conversations WHERE kind='GROUP'").get("n"))).longValue());
         assertEquals(0L,((Number)db.read(conn->SocialService.one(conn,"SELECT count(*) n FROM group_invites").get("n"))).longValue());
     }
+    @Test void publicGroupCanBeDiscoveredAndJoinedWithoutFriendship()throws Exception {
+        long group=((Number)call(a,"GROUP_CREATE",Map.of("title","Open study room")).get("conversationId")).longValue();
+        Map<String,Object> page=call(c,"GROUP_PUBLIC_LIST",Map.of("limit",20));
+        Map<?,?> listed=((List<?>)page.get("items")).stream()
+                .map(x->(Map<?,?>)x)
+                .filter(x->((Number)x.get("conversationId")).longValue()==group)
+                .findFirst().orElseThrow();
+        assertEquals("Open study room",listed.get("title"));
+        assertEquals(true,listed.get("canJoin"));
+        call(c,"GROUP_JOIN",Map.of("conversationId",group));
+        assertEquals(2,((List<?>)call(c,"GROUP_MEMBERS_GET",Map.of("conversationId",group)).get("items")).size());
+        Map<?,?> after=((List<?>)call(c,"GROUP_PUBLIC_LIST",Map.of("limit",20)).get("items")).stream()
+                .map(x->(Map<?,?>)x)
+                .filter(x->((Number)x.get("conversationId")).longValue()==group)
+                .findFirst().orElseThrow();
+        assertEquals(1L,((Number)after.get("joined")).longValue());
+    }
     @Test void friendRaceAndStaleRequest()throws Exception {
         Map<String,Object> r=call(a,"FRIEND_REQUEST",Map.of("targetUserId",b));
         assertCode("INCOMING_REQUEST_EXISTS",()->call(b,"FRIEND_REQUEST",Map.of("targetUserId",a)));
