@@ -1,10 +1,12 @@
 # 08 — Chiến lược kiểm thử, đóng gói và bảo vệ đồ án
 
+> Phạm vi hiện tại (12/10/2026): TCP/IP thường; không dùng TLS. UDP tắt mặc định, các phần UDP bên dưới chỉ là mô tả tương thích/tuỳ chọn.
+
 Runtime v2 và các bộ test tự động đã có source. Ma trận dưới đây vẫn là yêu cầu nghiệm thu; không tự đánh dấu mọi hàng PASS vì Maven chạy thành công. Kết quả thực tế, các test liên quan và giới hạn môi trường được ghi riêng tại [implementation-status](implementation-status.md). Mỗi kết quả phải ghi revision, thời gian, môi trường và evidence; chỉ khi cả kiểm thử tự động lẫn các gate nhiều máy/UI đạt mới tuyên bố hoàn thành nghiệm thu.
 
 ## Kết quả thực tế ngày 07/10/2026
 
-Full Maven package: common6/server59/client11 (76 test), không fail/error/skipped. Sau thay đổi UI TTL, targeted client12/common6 package PASS; coverage hiện tại 77 test duy nhất qua hai run, không phải một full run77. Load20/50 dưới -Xmx512m PASS; số đo và môi trường tại implementation-status/performance.json. Packaged Windows TLS/UDP/live Swing và backup/restore CLI/restored-data smoke PASS trong `.tmp/package-smoke-1791331232567`.
+Kết quả cũ ngày 07/10/2026 nằm trong [bản lưu](archive/implementation-status-2026-10-07.md). Kết quả bản TCP hiện tại và giới hạn nghiệm thu nằm trong [implementation-status.md](implementation-status.md).
 
 Những kết quả trên chưa đánh dấu các checkbox UI/đa máy/Linux/firewall/crash/30cycles bên dưới. Chỉ claim phần thực sự có report/capture.
 
@@ -12,9 +14,9 @@ Những kết quả trên chưa đánh dấu các checkbox UI/đa máy/Linux/fir
 
 1. Unit có giá trị: validator, policy/privacy matrix, state transitions, cursor, HMAC/replay, chunk offset/quota. Không ưu tiên test getter/setter hay UI màu sắc.
 2. Repository/transaction integration: SQLite temp DB, migration, UNIQUE/FK, race, rollback, seq/idempotency/outbox. Dùng constraint thật, không mock mất tính chất atomic.
-3. Protocol integration: server trên port ngẫu nhiên + 2–3 test client sockets/TLS, UDP socket thật, request/event interleaving, slow reader, abrupt close. Không ngủ cố định dài; await có deadline và assert.
+3. Protocol integration: server trên port ngẫu nhiên + 2–3 test client sockets/TCP, UDP socket thật, request/event interleaving, slow reader, abrupt close. Không ngủ cố định dài; await có deadline và assert.
 4. End-to-end Desktop: Swing hai/ba client thật, Windows/Linux, mọi trạng thái UI/transfer/disconnect/permission. Test localhost chưa thay được thử LAN/VM.
-5. Release/ops: chạy từ thư mục mới, TLS trust, firewall, backup/restore, restart/crash, storage recovery và tải bounded.
+5. Release/ops: chạy từ thư mục mới, TCP connect, firewall, backup/restore, restart/crash, storage recovery và tải bounded.
 
 Chia unit/integration profile nếu cần để test nhanh; CI chạy cả bộ bắt buộc trước release. Không bỏ integration vì cần socket; bind loopback/ephemeral ports và close tài nguyên.
 
@@ -26,7 +28,7 @@ Chia unit/integration profile nếu cần để test nhanh; CI chạy cả bộ 
 | QA-NET01 | Unicode/emoji, frame split/coalesced, nhiều frame liên tiếp | Decode đúng boundary, giữ requestId |
 | QA-NET02 | Length âm/0/oversize, EOF nửa header/payload, JSON hỏng/deep/field sai | Reject bounded, close malformed, không crash server/allocate lớn |
 | QA-NET03 | Response/event xen kẽ, type lạ, timeout, version sai | Pending đúng correlation; lỗi chuẩn; capabilities đúng |
-| QA-SEC01 | TLS valid/self-signed truststore, cert không tin, discovery giả | Chỉ gửi password sau trust; không trust-all/OFFER |
+| QA-SEC01 | TCP thường, HELLO/auth/session, malformed/oversize frame | Không vượt quyền session; frame lỗi bị đóng; không yêu cầu chứng chỉ |
 | QA-LIFE01 | 50 socket chưa auth, socket 51, idle deadline, heartbeat mất | Cap mọi connection; cleanup permit/thread/online đúng |
 | QA-LIFE02 | Một recipient không đọc + broadcast/file/chat | Queue bounded, user khác vẫn hoạt động, slow connection bị close có kiểm soát |
 | QA-LIFE03 | Stop/new/failed bind/repeated close, client abrupt close | Socket/workers/temp/DB đóng đúng; process exit bounded |
@@ -76,15 +78,15 @@ Chia unit/integration profile nếu cần để test nhanh; CI chạy cả bộ 
 | QA-PERF02 | Bulk 2×25MiB + chat, slow reader, leak repeated cycles | Không linear memory/file, control vẫn được phục vụ |
 | QA-OPS01 | Stop backup/restore DB+media inventory/hash | Restore riêng giữ tất cả quan hệ/data/ảnh/tệp |
 | QA-OPS02 | Recovery/retention/log rotate/config range/cwd thay | Không nhầm DB, không secret log, không xóa reference còn dùng |
-| QA-REL01 | JAR/source/config/truststore trên máy sạch | Có prerequisites và launch đúng, error hỗ trợ được |
+| QA-REL01 | JAR/source/config trên máy sạch | Có prerequisites và launch đúng, error hỗ trợ được |
 | QA-REL02 | Windows + Linux + no-ui + LAN/VM/firewall | Ít nhất hai môi trường thật dùng cùng server |
-| QA-DEMO | Luồng A/B/C/admin và capture mạng | Minh chứng end-to-end TCP/TLS+UDP+persistence+ACL |
+| QA-DEMO | Luồng A/B/C/admin và capture mạng | Minh chứng end-to-end TCP+UDP+persistence+ACL |
 
 P1-specific test (group/admin/receipt/resume/typing/ops tải) thực hiện ở M5/M6; các test nền quyền, data, auth, file cơ bản là gate P0. Tất cả ma trận áp dụng khi tuyên bố bản hoàn chỉnh.
 
 ## 3. Checklist UI thủ công
 
-- [ ] QA-UI01: connect/timeout/cert/đăng ký/login/password change; button không pending mãi.
+- [ ] QA-UI01: connect/timeout/đăng ký/login/password change; button không pending mãi.
 - [ ] QA-UI02: friend requests đúng hướng/block/unblock/profile stale/search empty.
 - [ ] QA-UI03: composer ảnh/privacy/feed pages/like/comment/edit conflict/unavailable khi quyền đổi.
 - [ ] QA-UI04: chat history scroll/pending unknown/retry stable/file progress+cancel/checksum/receiver offline.
@@ -97,7 +99,7 @@ P1-specific test (group/admin/receipt/resume/typing/ops tải) thực hiện ở
 
 ## 4. Mục tiêu tải có thể đo
 
-Ghi CPU/RAM/JDK/OS/network/DB size; đo trên cấu hình demo thật. `LoadRuntimeTest` tạo 20 tài khoản, 10.000 post, 50.000 message, chạy burst feed/history/chat/receipt, 2×25 MiB upload/download streaming cùng MESSAGE_SEND/PING control, cap 50 TLS socket, slow reader và shutdown. Nó ghi số đo tại `server/target/qa/performance.json`. Đây là localhost acceptance workload; chưa thay thế workload LAN kéo dài, workload chat đều đặn kéo dài hoặc 30 chu kỳ cleanup. Các mục tiêu dưới đây vẫn giữ nguyên:
+Ghi CPU/RAM/JDK/OS/network/DB size; đo trên cấu hình demo thật. `LoadRuntimeTest` tạo 20 tài khoản, 10.000 post, 50.000 message, chạy burst feed/history/chat/receipt, 2×25 MiB upload/download streaming cùng MESSAGE_SEND/PING control, cap 50 TCP socket, slow reader và shutdown. Nó ghi số đo tại `server/target/qa/performance.json`. Đây là localhost acceptance workload; chưa thay thế workload LAN kéo dài, workload chat đều đặn kéo dài hoặc 30 chu kỳ cleanup. Các mục tiêu dưới đây vẫn giữ nguyên:
 
 | Workload | Target |
 |---|---|
@@ -124,19 +126,18 @@ release/social-v2-<timestamp>/
   server/target/server-1.0.0-SNAPSHOT-shaded.jar
   client/target/client-1.0.0-SNAPSHOT-shaded.jar
   server/config/social.properties
-  config/tls/truststore.p12  tùy chọn -IncludeClientTruststore, chỉ cert public
   scripts/                   launch Windows/Linux
   source/                    Maven source/tests, không cache/data
   checksums.sha256
 ```
 
-Server private key/keystore password/DB user thật không chia trong release client hoặc Git. Server admin/bootstrap có hướng dẫn riêng, không hardcode credential. Truststore public/cert phân phối từ server operator qua kênh tin cậy; password truststore không biến certificate công khai thành bí mật.
+Database và dữ liệu người dùng không chia trong release hoặc Git. Server admin/bootstrap có hướng dẫn riêng, không hardcode credential.
 
 Lựa chọn packaging bắt buộc: shaded JAR + JDK17 cài trước, rõ cách chạy/no-ui. `jpackage` runtime bundle là P2, không tự tạo installer Windows rồi gọi đó là Linux compatible. Test release từ thư mục sạch, port/config/data path không phụ thuộc checkout.
 
 ### Mạng và VM
 
-- TCP5000/TLS, UDP5001 discovery, UDP5002 realtime trên private LAN; ghi port override nếu đổi.
+- Chỉ cần TCP5000 trên private LAN theo cấu hình mặc định; UDP đã tắt. Ghi port override nếu đổi.
 - Server bind đúng interface; client máy khác không dùng127.0.0.1. Firewall rule theo port thực tế/private profile và operator tự áp.
 - VM Host-only/Bridged cho demo; broadcast có thể không qua NAT, luôn có host/IP tay và unicast discovery.
 - Lệnh kiểm TCP như Test-NetConnection/nc không chứng minh UDP hoạt động. UDP chứng minh bằng datagram capture/log/app event.
@@ -165,23 +166,23 @@ Crash drills tại: trước commit, sau commit trước push, sau ACK storage c
 
 Chuẩn bị A/B/C + ADMIN, một client Linux/VM và một Windows, seed PUBLIC/FRIENDS/ONLY_ME/file nhỏ; có backup release ổn định.
 
-1. Chạy server/dashboard/no-ui và clients; dùng UDP tìm server, chỉ TCP/TLS established sau trust. Capture discovery nonce/OFFER.
+1. Chạy server/dashboard/no-ui và clients; nhập IP/port trên form rồi đăng nhập qua TCP.
 2. Login A/B/C. A gửi friend request, B ACCEPT. C không friend.
 3. A post FRIENDS + ảnh; B thấy và like/comment; A notification, C không đọc bằng direct ID/media.
 4. A đổi ONLY_ME khi B đang mở, B refresh/comment/download nhận unavailable. A post PUBLIC khác để C xem bình thường.
-5. A/B chat, bắt typing UDP/TTL, STORED/DELIVERED/READ. Mất một typing packet không mất message.
+5. A/B chat TCP, kiểm STORED/DELIVERED/READ; nhóm chỉ phát cho thành viên hiện tại và Broadcast cho tất cả tài khoản online.
 6. B logout, A gửi text + file upload READY; restart server; B login lấy history/download và verify SHA-256.
 7. Mô phỏng A mất ACK sau commit, retry cùng clientMessageId; chỉ một message.
 8. A block B; lời mời/chat mới/post view bị chặn, history direct cũ còn. Nhóm P1 minh họa invite/owner/kick/visibleFromSeq ngắn.
 9. C report post được xem; ADMIN claim/hide hoặc suspend user demo; audit record/outcome tồn tại, không đọc private chat.
-10. Chặn UDP hoặc tắt discovery; nhập IP vẫn login/chat TCP. Kết bằng bảng test và giới hạn đã đo.
+10. Client trên máy ảo nhập IP server và đăng nhập TCP. Kiểm Unicast, Group, Broadcast; ghi kết quả thực tế.
 
-Để chứng minh TCP length-prefix với TLS: test codec pre-encryption + log metadata frame size/type/requestId không chứa auth/private text; Wireshark thấy TCP/TLS records, UDP thấy discovery/typing envelope. Không tắt TLS khi gửi password thật chỉ để xem plaintext capture.
+Để chứng minh framing: test codec và log metadata frame size/type/requestId; có thể bắt TCP trên dữ liệu demo để đối chiếu 4-byte length và JSON.
 
 ## 8. Báo cáo và bằng chứng nộp
 
 - Bài toán/phạm vi/use cases/actors, BR privacy/friend/block và state diagrams.
-- Architecture/modules/thread/queues, TCP framing/TLS, UDP HMAC/TTL/fallback, ERD/schema/migration.
+- Architecture/modules/thread/queues, TCP framing, UDP HMAC/TTL/fallback, ERD/schema/migration.
 - Sequence auth/post/send/offline/file, transaction/dedup và xử lý crash.
 - Requirement BR-* → backlog B* → test QA-* → actual result/evidence.
 - Môi trường LAN/VM/OS/JDK, số đo tải, ảnh UI thật/capture log redacted, file release checksum.
@@ -205,5 +206,5 @@ Bug liên quan nếu FAIL:
 - [ ] Toàn P0/P1 backlog và test bắt buộc pass với evidence; flaky/race được xử lý.
 - [ ] Windows/Linux đa máy và UDP fallback đã thử, không chỉ localhost.
 - [ ] Restart/crash/backup restore thực tế pass, không mất durable data hoặc tạo duplicate.
-- [ ] Release từ thư mục mới chạy, config/truststore/admin setup rõ; không secret trong repo/log.
+- [ ] Release từ thư mục mới chạy, config/admin setup rõ; không secret trong repo/log.
 - [ ] Tài liệu khớp source, tính năng chưa làm ghi ngoài phạm vi, báo cáo không dùng kế hoạch làm bằng chứng.

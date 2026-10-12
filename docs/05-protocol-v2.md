@@ -1,12 +1,12 @@
-# 05 — Hợp đồng giao thức TCP/TLS và UDP phiên bản 2
+# 05 — Hợp đồng giao thức TCP và UDP phiên bản 2
 
-> Phạm vi đồ án hiện tại: chạy TCP/TLS. UDP được giữ trong mã tương thích cũ nhưng cấu hình mặc định `network.udp.enabled=false`; client không dùng discovery hoặc typing UDP.
+> Phạm vi đồ án hiện tại: chạy TCP. UDP được giữ trong mã tương thích cũ nhưng cấu hình mặc định `network.udp.enabled=false`; client không dùng discovery hoặc typing UDP.
 
 Giao thức v2 đã có runtime `SocialServer`, transport `SocialClient` và giao diện `SocialWindow`. MiniChat v1 được giữ riêng trong các class cũ; entry point/shaded JAR mặc định chạy v2. Client/server v2 phải nâng cùng nhau; envelope có protocolVersion sai nhận VERSION_UNSUPPORTED rồi đóng kết nối. Tình trạng kiểm thử và giới hạn triển khai nằm tại [implementation-status](implementation-status.md).
 
 ## 1. TCP framing và envelope
 
-TLS chạy trên TCP 5000; bên trong TLS giữ frame `[4-byte big-endian unsigned length][UTF-8 JSON]`. Java đọc int thì reject `length <= 0` hoặc `>1.048.576` trước cấp buffer. JSON thuần, không Java ObjectInputStream. EOF trước header là disconnect; EOF giữa header/payload là truncated frame. Malformed/oversize frame log code và close connection, không cố resync stream đã sai boundary.
+TCP chạy trên port 5000; giữ frame `[4-byte big-endian unsigned length][UTF-8 JSON]`. Java đọc int thì reject `length <= 0` hoặc `>1.048.576` trước cấp buffer. JSON thuần, không Java ObjectInputStream. EOF trước header là disconnect; EOF giữa header/payload là truncated frame. Malformed/oversize frame log code và close connection, không cố resync stream đã sai boundary.
 
 Request mẫu:
 
@@ -71,7 +71,7 @@ type là command/event string whitelist. Runtime hiện dùng WireMessage bean v
 
 ## 2. Session và request semantics
 
-1. TLS handshake với truststore/pin hợp lệ.
+1. Kết nối Socket TCP tới IP/hostname và port server (deadline 5 giây).
 2. HELLO `{supportedVersions:[2], clientVersion}` → `{selectedVersion:2, capabilities, limits, heartbeatIntervalMs, serverId, serverTime}`.
 3. AUTH_REGISTER hoặc AUTH_LOGIN. Sau login trả `user` (DTO hồ sơ hiện tại), sessionId, UDP config/key. Session gắn socket, không gửi TCP bearer token mọi request.
 4. Các request auth-only lấy actor từ connection; PING/LOGOUT vẫn có schema/check state.
@@ -140,7 +140,7 @@ Client pending request có deadline 10s thường/60s finalize. Timeout = kết 
 | ADMIN_USER_UNSUSPEND* | targetUserId, reason | Audit; ADMIN |
 | ADMIN_GROUP_OWNER_TRANSFER/CLOSE* | conversationId, targetUserId?, expectedVersion, reason | Chỉ khi owner SUSPENDED; ADMIN, active member mới/audit |
 | STATE_SYNC | conversationsCursor?, notificationsCursor?, limit | Hai page metadata độc lập + next cursor/hasMore từng loại, currentProfileVersion/relationshipsVersion |
-| UDP_SESSION_REFRESH | rỗng | Key mới/expiry; chỉ TLS auth |
+| UDP_SESSION_REFRESH | rỗng | Key mới/expiry; chỉ TCP auth |
 
 Media/transfer dùng catalog riêng ở phần 6. Runtime hiện có GROUP, admin, receipt và typing; HELLO khai báo capability tương ứng. Type ngoài catalog trả UNSUPPORTED_OPERATION. Việc một capability đã có source không thay thế bằng chứng kiểm thử nhiều máy hoặc checklist UI ở tài liệu [08](08-testing-release.md).
 
@@ -214,12 +214,12 @@ Transfer idle deadline mặc định 30s không có chunk/ACK hợp lệ; kết 
 - Request `{protocolVersion:2,type:"DISCOVER",nonce:"random-128-bit",padding:"..."}` khoảng 256–512 byte. Server unicast OFFER về source endpoint, echo nonce, serverId/name, tcpPort, protocolVersion; **không** user list/token/password/internal path.
 - Reply không lớn hơn request để giảm amplification; rate-limit theo source IP/global. Datagram max 1.200 byte. DISCOVER không hợp lệ không reply.
 - Retry tối đa 3 lần khoảng 500ms + jitter, UI hết hạn danh sách sau vài giây. Không có UDP reliable-delivery handshake.
-- OFFER là gợi ý địa chỉ chưa tin cậy. Client connect TLS, kiểm cert/pin và serverId. Không lấy trust fingerprint từ OFFER rồi auto-trust chính server quảng bá.
+- OFFER chỉ là gợi ý địa chỉ; client chọn IP/port và thực hiện HELLO. Discovery và typing UDP không thuộc luồng client mặc định.
 - Khi broadcast bị chặn vẫn nhập host/TCP port thủ công; discovery không là dependency của auth.
 
 ## 8. UDP registration/typing — port 5002, P1
 
-Login TLS cấp `sessionId,keyEpoch,udpKey(32 byte random),keyExpiresAt,serverUdpPort`. Key tối đa 30 phút, refresh qua UDP_SESSION_REFRESH trước expiry; revoke khi logout/suspend/password change. Mỗi refresh tăng keyEpoch, vô hiệu key cũ ngay, clear endpoint, reset highestSeq/C2S/S2C counters cho epoch mới và yêu cầu UDP_REGISTER mới. Gói epoch cũ đang bay bị drop; không dùng userId/source IP đơn thuần làm xác thực.
+Login TCP cấp `sessionId,keyEpoch,udpKey(32 byte random),keyExpiresAt,serverUdpPort`. Key tối đa 30 phút, refresh qua UDP_SESSION_REFRESH trước expiry; revoke khi logout/suspend/password change. Mỗi refresh tăng keyEpoch, vô hiệu key cũ ngay, clear endpoint, reset highestSeq/C2S/S2C counters cho epoch mới và yêu cầu UDP_REGISTER mới. Gói epoch cũ đang bay bị drop; không dùng userId/source IP đơn thuần làm xác thực.
 
 Envelope UDP:
 
@@ -240,7 +240,7 @@ HMAC trên byte chính xác `UTF8("social-udp-v2:C2S:") || decodedBodyBytes`, ke
 3. C2S TYPING tối đa 2 gói/giây/conversation, debounce khoảng 500ms; server kiểm quyền gửi direct/group theo policy và fan-out tới endpoint member còn quyền.
 4. S2C TYPING chứa actorId do server cấp, conversationId, expiresAt; ký bằng **key riêng của từng recipient**, server seq riêng. Không forward MAC từ sender cho user khác.
 
-C2S/S2C giữ highestSeq riêng per session; seq ≤highest bị drop (gói đảo thứ tự chấp nhận mất vì ephemeral). Timestamp lệch server quá 30s drop; client dùng serverTime từ TLS để ước lượng offset, không đòi đồng hồ máy tuyệt đối giống nhau. TTL typing 5s, tự hết nếu mất `typing=false`; không ghi DB, không retry từng typing, không ACK typing.
+C2S/S2C giữ highestSeq riêng per session; seq ≤highest bị drop (gói đảo thứ tự chấp nhận mất vì ephemeral). Timestamp lệch server quá 30s drop; client dùng serverTime từ TCP để ước lượng offset, không đòi đồng hồ máy tuyệt đối giống nhau. TTL typing 5s, tự hết nếu mất `typing=false`; không ghi DB, không retry từng typing, không ACK typing.
 
 Nếu UDP registration/key hết hạn/mạng bị chặn: bỏ typing, chat TCP vẫn hoạt động. Presence chỉ TCP. UDP payload không có message text/file/avatar; HMAC xác thực nhưng không mã hóa, nên chỉ mang metadata tối thiểu. Không dùng UDP làm xác nhận message/file/notification.
 

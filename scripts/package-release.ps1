@@ -1,4 +1,4 @@
-param([switch]$IncludeClientTruststore)
+﻿param()
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 $releaseName = 'social-v2-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -7,7 +7,7 @@ if (Test-Path -LiteralPath $releaseDirectory) { throw 'Thư mục release đã t
 $artifacts = @('server/target/server-1.0.0-SNAPSHOT-shaded.jar','client/target/client-1.0.0-SNAPSHOT-shaded.jar')
 foreach ($artifact in $artifacts) { if (-not (Test-Path -LiteralPath $artifact)) { throw 'Build package trước khi tạo release.' } }
 New-Item -ItemType Directory -Path $releaseDirectory | Out-Null
-foreach ($folder in @('server/target','server/config','client/target','scripts','docs','config/tls','source')) {
+foreach ($folder in @('server/target','server/config','client/target','scripts','docs','source')) {
     New-Item -ItemType Directory -Path (Join-Path $releaseDirectory $folder) -Force | Out-Null
 }
 Copy-Item -LiteralPath $artifacts[0] -Destination (Join-Path $releaseDirectory 'server/target/server-1.0.0-SNAPSHOT-shaded.jar')
@@ -24,9 +24,6 @@ Get-ChildItem -LiteralPath 'scripts' -Directory | ForEach-Object {
 }
 Get-ChildItem -LiteralPath 'docs' -Filter '*.md' -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $releaseDirectory ('docs/' + $_.Name)) }
 Copy-Item -LiteralPath 'docs/archive' -Destination (Join-Path $releaseDirectory 'docs/archive') -Recurse
-if ($IncludeClientTruststore -and (Test-Path -LiteralPath 'config/tls/truststore.p12')) {
-    Copy-Item -LiteralPath 'config/tls/truststore.p12' -Destination (Join-Path $releaseDirectory 'config/tls/truststore.p12')
-}
 Copy-Item -LiteralPath 'pom.xml','plan.md','.gitignore' -Destination (Join-Path $releaseDirectory 'source')
 foreach ($module in @('common','server','client')) {
     New-Item -ItemType Directory -Path (Join-Path $releaseDirectory $module) -Force | Out-Null
@@ -58,4 +55,4 @@ $manifestLines = Get-ChildItem -LiteralPath $releaseDirectory -File -Recurse | S
 }
 Set-Content -LiteralPath (Join-Path $releaseDirectory 'checksums.sha256') -Value $manifestLines -Encoding utf8
 Write-Output ('Release created: ' + $releaseDirectory)
-Write-Output 'server.p12, password.local, databases, uploads and Maven cache were excluded.'
+Write-Output 'databases, uploads and Maven cache were excluded.'

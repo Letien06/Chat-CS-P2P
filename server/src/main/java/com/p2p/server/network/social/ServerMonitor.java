@@ -20,7 +20,7 @@ public final class ServerMonitor {
             Runnable shutdown=()->{stop.setEnabled(false);new Thread(()->{server.close();SwingUtilities.invokeLater(frame::dispose);},"operator-stop").start();};
             stop.addActionListener(e->shutdown.run());frame.addWindowListener(new WindowAdapter(){public void windowClosing(WindowEvent e){shutdown.run();}});
             Timer timer=new Timer(1000,e->{
-                info.setText("TCP/TLS: "+server.tcpPort()+"\nUDP tìm server: "+server.discoveryPort()+"\nUDP đang nhập: "+server.typingPort()+"\n\nKết nối: "+server.connectionCount()+" / "+config.maxConnections()+"\nTài khoản online: "+server.authenticatedCount()+"\n\nDatabase: "+config.databasePath().toAbsolutePath()+"\nMedia: "+config.storageRoot().toAbsolutePath()+"\n\nLog chi tiết ở terminal và thư mục logs.");
+                info.setText("TCP: "+server.tcpPort()+"\nUDP: "+(config.udpEnabled()?"enabled":"disabled")+"\n\nKết nối: "+server.connectionCount()+" / "+config.maxConnections()+"\nTài khoản online: "+server.authenticatedCount()+"\n\nDatabase: "+config.databasePath().toAbsolutePath()+"\nMedia: "+config.storageRoot().toAbsolutePath()+"\n\nLog chi tiết ở terminal và thư mục logs.");
                 if(server.isClosed()){((Timer)e.getSource()).stop();frame.dispose();}
             });timer.start();frame.setContentPane(panel);frame.setSize(630,420);frame.setLocationByPlatform(true);frame.setVisible(true);
         });

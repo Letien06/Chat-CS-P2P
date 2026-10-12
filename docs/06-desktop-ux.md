@@ -1,5 +1,7 @@
 # 06 — Màn hình Desktop và luồng trải nghiệm
 
+> Phạm vi hiện tại (12/10/2026): TCP/IP thường; không dùng TLS. UDP tắt mặc định, các phần UDP bên dưới chỉ là mô tả tương thích/tuỳ chọn.
+
 Thiết kế Swing mục tiêu; tái dùng FlatLaf/Theme/AppIcon nhưng tách ChatFrame thành panel/controller/service. Mỗi màn hình cần trạng thái loading, empty, error, disconnected và không được treo EDT.
 
 ## 1. Cấu trúc điều hướng
@@ -20,7 +22,7 @@ MainFrame: navigation trái, nội dung giữa, khu vực phụ tùy màn hình,
 
 | View | Nội dung/hành động | Điều kiện và trạng thái cần xử lý |
 |---|---|---|
-| ServerConnectionPanel | Host, port, tìm server LAN, chọn kết nối | Loading/không tìm thấy/IP sai/timeout/cert không tin; luôn nhập tay được |
+| ServerConnectionPanel | Host, port, tìm server LAN, chọn kết nối | Loading/không tìm thấy/IP sai/timeout/port sai; luôn nhập tay được |
 | LoginPanel | Username, password, đăng nhập, chuyển đăng ký | Disable khi request pending, lỗi auth chung, đang đăng nhập máy khác, server offline |
 | RegisterPanel | Username, tên hiển thị, password/confirm | Validation trước gửi, duplicate, rate limit; success trở lại login |
 | FeedPanel | Composer, post cards, tải thêm/refresh | Empty feed/loading page/error retry; không nhảy scroll khi bài mới |
@@ -41,7 +43,7 @@ MainFrame: navigation trái, nội dung giữa, khu vực phụ tùy màn hình,
 
 ### Đăng ký và vào ứng dụng
 
-Chọn server → kiểm kết nối tin cậy → đăng ký → login → load current profile/relationships/conversation/notifications metadata → main screen. Discovery OFFER không cho quyền tự trust certificate; phân phối truststore/fingerprint trước demo theo hướng dẫn kỹ thuật.
+Nhập IP/port server → kiểm kết nối TCP → đăng ký → login → load current profile/relationships/conversation/notifications metadata → main screen. Client mặc định chỉ cần IP, port, tài khoản và mật khẩu.
 
 Không giữ login button pending vô hạn. Timeout cho retry có giải thích ngắn. Password field dùng JPasswordField; bỏ char[] sau request, không ghi debug. Tránh thông báo kỹ thuật stacktrace/SQL cho user.
 

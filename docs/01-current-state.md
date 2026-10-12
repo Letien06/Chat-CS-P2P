@@ -1,5 +1,7 @@
 # 01 — Hiện trạng source và khoảng cách tới mạng xã hội
 
+> Phạm vi hiện tại (12/10/2026): TCP/IP thường; không dùng TLS. UDP tắt mặc định, các phần UDP bên dưới chỉ là mô tả tương thích/tuỳ chọn.
+
 Kiểm tra ngày 07/10/2026 bằng source đang có, bao gồm thay đổi cục bộ trong `ClientHandler.java`. Đây là audit tĩnh; không khẳng định đã chạy lại build, GUI hay benchmark. Không chỉnh source Java trong đợt viết kế hoạch này.
 
 ## 1. Những phần có thật
@@ -40,13 +42,13 @@ Tên file nguồn đầy đủ nằm trong các thư mục `server/src/main/java
 
 | Mức | Vấn đề | Tác động | Hướng xử lý |
 |---|---|---|---|
-| P0 | JOIN không xác thực | Chiếm danh tính, không có owner đáng tin | AuthService, hash, TLS, userId từ session |
+| P0 | JOIN không xác thực | Chiếm danh tính, không có owner đáng tin | AuthService, hash, userId từ session |
 | P0 | File event forward bất kỳ theo tên | Giả chunk/cancel, không ràng buộc sender/receiver | Transfer FSM, server storage và ACL |
 | P0 | maxClients đếm user đã JOIN | Socket chưa JOIN vô hạn, pool cached không giới hạn | Registry mọi socket, permit, deadline handshake |
 | P0 | `FrameCodec.write` static synchronized | Một stream chậm chặn mọi stream cùng JVM | Codec stateless; writer riêng mỗi connection |
 | P0 | Session.send trực tiếp, broadcast tuần tự | Recipient chậm chặn sender/server | Queue outbound hữu hạn, backpressure |
 | P0 | DB nhiều thao tác chưa transaction | Tạo room có thể không có owner member; race nghiệp vụ | Transaction ở service, constraints |
-| P0 | Plain TCP | Khi thêm password sẽ truyền credential không được bảo vệ | TLS trước khi đưa auth vào demo LAN |
+| P0 | Plain TCP | Khi thêm password sẽ truyền credential không được bảo vệ | TCP thường theo phạm vi đồ án; xác thực và quyền từ session |
 | P1 | ACK “Delivered” sau ghi socket | UI báo nhận dù recipient chưa xử lý; retry nhân đôi | STORED ACK + recipient ACK + dedup |
 | P1 | Stop chỉ shutdownNow rồi close DB | Blocking read còn sống; DB đóng trước handler | Close sockets, await workers, close DB cuối |
 | P1 | close guard running false | Lỗi bind/close trước start có thể giữ DB | Lifecycle NEW/RUNNING/STOPPING/CLOSED |

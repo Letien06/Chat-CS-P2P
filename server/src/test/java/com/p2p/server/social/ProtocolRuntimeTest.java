@@ -8,38 +8,15 @@ import java.net.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
-import javax.net.ssl.*;
 import java.security.MessageDigest;
 class ProtocolRuntimeTest {
     @TempDir Path dir;
-    SSLContext serverTls,clientTls;
     SocialServer server;
     ExecutorService acceptor;
     Future<?> running;
-    static final char[] PASSWORD="test-keystore-password".toCharArray();
-    @BeforeEach void setup()throws Exception {
-        Path key=dir.resolve("server.p12"),cert=dir.resolve("cert.cer"),trust=dir.resolve("trust.p12");
-        keytool("-genkeypair","-alias","test","-keyalg","RSA","-keysize","2048","-validity","1","-dname","CN=localhost","-ext","SAN=dns:localhost,ip:127.0.0.1","-keystore",key.toString(),"-storetype","PKCS12","-storepass:env","SOCIAL_TEST_PASSWORD");
-        keytool("-exportcert","-alias","test","-keystore",key.toString(),"-storepass:env","SOCIAL_TEST_PASSWORD","-file",cert.toString());
-        keytool("-importcert","-noprompt","-alias","test","-file",cert.toString(),"-keystore",trust.toString(),"-storetype","PKCS12","-storepass:env","SOCIAL_TEST_PASSWORD");
-        serverTls=TlsContexts.server(key,PASSWORD);
-        clientTls=TlsContexts.client(trust,PASSWORD);
-        start();
-    }
-    void keytool(String...args)throws Exception {
-        List<String> command=new ArrayList<>();
-        command.add(Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name").startsWith("Windows")?"keytool.exe":"keytool").toString());
-        command.addAll(List.of(args));
-        ProcessBuilder builder=new ProcessBuilder(command);
-        builder.environment().put("SOCIAL_TEST_PASSWORD",new String(PASSWORD));
-        builder.redirectErrorStream(true);
-        Process process=builder.start();
-        String output=new String(process.getInputStream().readAllBytes());
-        assertTrue(process.waitFor(30,TimeUnit.SECONDS));
-        assertEquals(0,process.exitValue(),output);
-    }
+    @BeforeEach void setup()throws Exception { start(); }
     void start()throws Exception {
-        server=new SocialServer(new SocialServer.Config(dir.resolve("social.db"),dir.resolve("media"),"127.0.0.1",0,0,0,10,serverTls,10*1024*1024,30*1024*1024));
+        server=new SocialServer(new SocialServer.Config(dir.resolve("social.db"),dir.resolve("media"),"127.0.0.1",0,0,0,10,10*1024*1024,30*1024*1024,true));
         acceptor=Executors.newSingleThreadExecutor();
         running=acceptor.submit(()-> {
             try {
@@ -65,20 +42,16 @@ class ProtocolRuntimeTest {
         }
     }
     Client client()throws Exception {
-        return new Client(clientTls,server.tcpPort());
+        return new Client(server.tcpPort());
     }
     static class Client implements AutoCloseable {
-        final SSLSocket socket;
+        final Socket socket;
         final DataInputStream in;
         final DataOutputStream out;
         final List<WireMessage> events=new ArrayList<>();
-        Client(SSLContext tls,int port)throws Exception {
-            socket=(SSLSocket)tls.getSocketFactory().createSocket("localhost",port);
+        Client(int port)throws Exception {
+            socket=new Socket("localhost",port);
             socket.setSoTimeout(5000);
-            SSLParameters p=socket.getSSLParameters();
-            p.setEndpointIdentificationAlgorithm("HTTPS");
-            socket.setSSLParameters(p);
-            socket.startHandshake();
             in=new DataInputStream(socket.getInputStream());
             out=new DataOutputStream(socket.getOutputStream());
         }
@@ -91,7 +64,7 @@ class ProtocolRuntimeTest {
             WireCodec.write(out,request);
             for(;;) {
                 WireMessage m=WireCodec.read(in);
-                assertNotNull(m,"Transport closed before response");
+                if(m==null)throw new EOFException("Transport closed before response");
                 if("EVENT".equals(m.getKind()))events.add(m);
                 else {
                     assertEquals(request.getRequestId(),m.getRequestId());

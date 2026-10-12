@@ -1,13 +1,15 @@
 # 03 — Kiến trúc, concurrency và vận hành mục tiêu
 
-Thiết kế v2 chưa triển khai. Giữ một server Java 17, TCP/TLS, UDP và SQLite; không cần microservices/REST/web để đáp ứng đề tài Desktop.
+> Phạm vi hiện tại (12/10/2026): TCP/IP thường; không dùng TLS. UDP tắt mặc định, các phần UDP bên dưới chỉ là mô tả tương thích/tuỳ chọn.
+
+Thiết kế v2 đã có source triển khai. Giữ một server Java 17, TCP và SQLite; UDP chỉ giữ tương thích, tắt mặc định; không cần microservices/REST/web để đáp ứng đề tài Desktop.
 
 ## 1. Sơ đồ thành phần
 
 ```mermaid
 flowchart LR
-  A[Desktop A - Swing] -->|TCP/TLS 5000| T[TcpServer / Dispatcher]
-  B[Desktop B - Swing] -->|TCP/TLS 5000| T
+  A[Desktop A - Swing] -->|TCP 5000| T[TcpServer / Dispatcher]
+  B[Desktop B - Swing] -->|TCP 5000| T
   A -.->|UDP 5001 discovery / 5002 typing| U[UdpServices]
   B -.->|UDP 5001 discovery / 5002 typing| U
   T --> S[Application Services + Policy]
@@ -45,7 +47,7 @@ server/src/main/java/com/p2p/server/
   events/         outbox dispatcher, invalidation, audience policy
   admin/          bootstrap tool, audit
 client/src/main/java/com/p2p/client/
-  network/        TLS, request futures, timeout, reader/writer, UDP
+  network/        TCP, request futures, timeout, reader/writer, UDP
   service/        auth, feed, chat, profile, media, notification
   state/          current user, connection, paged cache, cursors
   controller/     screen actions và orchestration
@@ -71,7 +73,7 @@ Luồng request: frame decode → envelope/version/schema validation → session
 
 ### Client
 
-- TLS connect/read/write, upload/download/hash/thumbnail chạy nền. Không ghi socket, đọc disk hay query mạng trên Swing EDT.
+- TCP connect/read/write, upload/download/hash/thumbnail chạy nền. Không ghi socket, đọc disk hay query mạng trên Swing EDT.
 - Reader dispatch response tới CompletableFuture theo requestId; event tới service/state, rồi mới invokeLater cập nhật view.
 - File chunk tới TransferService trực tiếp, không đưa Base64 của mọi chunk vào event queue EDT. Progress throttle khoảng 100–200 ms; chỉ UI model nhỏ được post lên EDT.
 - Client outbound queue hữu hạn tương tự server; khi mất kết nối vô hiệu hóa mutation, giữ pending ID trong RAM để tra lại sau login. Không tự gửi lại mutation với ID mới.
@@ -101,17 +103,17 @@ Mutation commit gồm business row + outbox row. Dispatcher đọc outbox sau co
 
 ## 6. Lifecycle, timeout, shutdown
 
-- Connect/TLS deadline 5 giây mỗi bước, HELLO/auth deadline 15 giây. Response thường 10 giây; tác vụ finalize file có deadline riêng tối đa 60 giây theo kích thước.
+- Connect deadline 5 giây mỗi bước, HELLO/auth deadline 15 giây. Response thường 10 giây; tác vụ finalize file có deadline riêng tối đa 60 giây theo kích thước.
 - TCP PING 15 giây; phản hồi `kind=RESPONSE,type=PING` cùng requestId/nonce. Sau 45 giây không có frame hợp lệ/heartbeat response thì close. KeepAlive OS hỗ trợ, không thay heartbeat ứng dụng.
 - Ghi timestamp hoạt động theo monotonic clock cho timeout. UTC chỉ dùng dữ liệu/event; tránh đổi giờ máy làm phiên sống mãi.
 - Shutdown idempotent, kể cả lỗi bind hoặc NEW chưa start: ngừng accept/UDP → báo stopping nếu còn thời gian → revoke session và đóng toàn bộ socket → dừng transfer, persist offset/cleanup → await executors deadline → checkpoint/close DB. Đóng socket mới giải phóng blocking read.
 - Không update DB sau close; mỗi resource owned và close đúng một lần. Start fail phải close DB/pool đã mở.
 
-## 7. TLS, session và bảo mật thực dụng
+## 7. TCP, session và bảo mật thực dụng
 
-- SSLSocket/SSLServerSocket, TLS 1.2+ (ưu tiên 1.3). Demo LAN dùng certificate tự ký và truststore/pinned fingerprint được cung cấp ngoài discovery; không trust-all, không tự chấp nhận cert bất kỳ.
+- Socket/ServerSocket TCP thường; client nhập IP/hostname và port trên form, không cần chứng chỉ.
 - Password hash PBKDF2WithHmacSHA256, salt SecureRandom ít nhất 16 byte, output 32 byte, mặc định 600.000 iteration; lưu algorithm/iterations/salt/hash, benchmark login để điều chỉnh có căn cứ. Constant-time compare; rehash khi nâng tham số.
-- Client request userId chỉ target; actor từ session. Mỗi request check ACTIVE/auth_version. UDP key per-session cấp qua TLS, revoke theo logout/lock.
+- Client request userId chỉ target; actor từ session. Mỗi request check ACTIVE/auth_version. UDP key per-session cấp qua TCP, revoke theo logout/lock.
 - Typed DTO, Jackson không bật polymorphic default typing; giới hạn payload, collection, string, decode depth. Prepared statements; sort field whitelist; LIKE xử lý wildcard có chủ đích.
 - Rate-limit: login 5 lần/phút/IP+username, friend request 20/giờ/user, post 10/phút, message 60/phút, comment 30/phút, report 10/giờ. Các ngưỡng có config và test; trả RATE_LIMITED + retryAfterMs.
 - Không log password/hash/session key/UDP secret, raw message riêng hoặc full auth JSON. Log requestId, actorId, type, duration, outcome, byte count; dữ liệu nhạy cảm mask.
@@ -121,9 +123,9 @@ Mutation commit gồm business row + outbox row. Dispatcher đọc outbox sau co
 
 | Kênh | Mặc định | Nội dung |
 |---|---|---|
-| TCP/TLS | 5000 | HELLO/auth, mọi dữ liệu bền vững, history, file chunks |
-| UDP discovery | 5001 | DISCOVER/OFFER nhỏ, chưa auth, LAN |
-| UDP realtime | 5002 | REGISTER/typing signed, theo session TCP |
+| TCP | 5000 | HELLO/auth, mọi dữ liệu bền vững, history, file chunks |
+| UDP discovery (tắt mặc định) | 5001 | DISCOVER/OFFER nhỏ, chưa auth, LAN |
+| UDP realtime (tắt mặc định) | 5002 | REGISTER/typing signed, theo session TCP |
 
 Ví dụ cấu hình **mục tiêu**, chưa được ServerConfig hiện tại hỗ trợ:
 
@@ -141,11 +143,10 @@ storage.root=data/media
 media.image.max.bytes=5242880
 media.chat.max.bytes=26214400
 media.user.quota.bytes=209715200
-tls.enabled=true
-tls.key.store=config/server.p12
+network.udp.enabled=false
 ```
 
-Secret keystore/password lấy env/file local không Git. Fail-fast port 1–65535, limit dương, timeout/quota hợp lý. Đường dẫn relative resolve từ app root/config base được định nghĩa thống nhất, không tùy terminal cwd. Dashboard hiển thị path đã resolve và TCP/UDP status.
+Fail-fast port 1–65535, limit dương, timeout/quota hợp lý. Đường dẫn relative resolve từ app root/config base được định nghĩa thống nhất, không tùy terminal cwd. Dashboard hiển thị path đã resolve và TCP/UDP status.
 
 ## 9. Storage consistency, log và backup
 

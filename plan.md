@@ -1,6 +1,6 @@
-# Kế hoạch đồ án cuối kỳ: Mạng xã hội Java Desktop dùng Client–Server, TCP/TLS
+# Kế hoạch đồ án cuối kỳ: Mạng xã hội Java Desktop dùng Client–Server, TCP
 
-Ngày phân tích: **07/10/2026**. Nền tảng xuất phát: thư mục `chat_message` hiện tại.
+Ngày phân tích: **07/10/2026**, cập nhật phạm vi TCP/IP **12/10/2026**. Nền tảng xuất phát: thư mục `chat_message` hiện tại.
 
 > Đây là đặc tả và kế hoạch xuất phát từ MiniChat. Bản mạng xã hội v2 đã được triển khai trong source; tiến độ, bằng chứng kiểm thử và phần nghiệm thu còn cần môi trường thực tế nằm tại [implementation-status.md](docs/implementation-status.md). Kế hoạch chat/P2P cũ được giữ nguyên trong [bản lưu](docs/archive/mini-chat-plan-2026-09.md). Khi mô tả cũ khác source, lấy source làm căn cứ.
 
@@ -31,7 +31,7 @@ Khoảng cách lớn nhất không nằm ở việc thêm vài màn hình. Hiệ
 
 - Giữ **Java 17 + Swing + FlatLaf + Maven**, một server trung tâm; không chuyển framework UI trong lúc nâng cấp nghiệp vụ.
 - Giữ **SQLite** cho một server, mục tiêu nghiệm thu 20 client online và kiểm tra tải 50 connection. Đây là mục tiêu phải đo, chưa phải năng lực đã chứng minh.
-- Dùng TCP/TLS cho toàn bộ nghiệp vụ: client nhập IP/hostname, TCP port, tài khoản và mật khẩu; request, event, Unicast, Group và Broadcast đều đi qua server TCP.
+- Dùng TCP thường (Socket/ServerSocket), đã bỏ TLS; UDP tắt mặc định. Cho toàn bộ nghiệp vụ: client nhập IP/hostname, TCP port, tài khoản và mật khẩu; request, event, Unicast, Group và Broadcast đều đi qua server TCP.
 - File, avatar và ảnh bài đăng đi **Client → Server → Client**, lưu bền vững ở server; không tiếp tục P2P. Lưu tại server là thay đổi so với relay MiniChat.
 - Một tài khoản có tối đa một phiên đang hoạt động. Thiết bị khác được báo ALREADY_SIGNED_IN; không âm thầm đá phiên cũ.
 - Feed theo thời gian mới nhất, phân trang cursor; chưa làm gợi ý.
@@ -42,9 +42,9 @@ Khoảng cách lớn nhất không nằm ở việc thêm vài màn hình. Hiệ
 
 ## 4. Mức độ ưu tiên
 
-**P0 — bản cốt lõi chạy xuyên suốt:** protocol v2/TLS, tài khoản, hồ sơ, bạn bè, chặn, bài đăng và privacy, feed, like/comment, chat riêng có history/offline, file lưu server, thông báo bền vững, UDP discovery, kiểm thử và đóng gói.
+**P0 — bản cốt lõi chạy xuyên suốt:** protocol v2/TCP, tài khoản, hồ sơ, bạn bè, chặn, bài đăng và privacy, feed, like/comment, chat riêng có history/offline, file lưu server, thông báo bền vững, Broadcast, kiểm thử và đóng gói.
 
-**P1 — bản hoàn chỉnh của kế hoạch này:** nhóm chat theo lời mời và vai trò, read receipt, UDP typing có xác thực, báo cáo/admin, phục hồi kết nối và file, backup/restore, tải và kiểm tra quyền đầy đủ. Muốn tuyên bố hoàn thành theo tài liệu này phải xong cả P0 và P1.
+**P1 — bản hoàn chỉnh của kế hoạch này:** nhóm chat theo lời mời và vai trò, read receipt, báo cáo/admin, phục hồi kết nối và file, backup/restore, tải và kiểm tra quyền đầy đủ. Muốn tuyên bố hoàn thành theo tài liệu này phải xong cả P0 và P1.
 
 **P2 — nâng cao tùy thời gian:** tìm nội dung toàn văn, nhiều reaction, comment nhiều cấp, offline draft, dark mode, PostgreSQL, nhiều phiên, gọi thoại/video. Không trì hoãn P0/P1 để làm P2.
 
@@ -53,11 +53,11 @@ Khoảng cách lớn nhất không nằm ở việc thêm vài màn hình. Hiệ
 | Mốc | Kết quả review được | Điều kiện chuyển mốc |
 |---|---|---|
 | M0 | Snapshot bài tập, audit, source/test hiện tại được ghi nhận | Phân biệt tính năng có thật với kế hoạch cũ |
-| M1 | Protocol v2, TLS, lifecycle socket, migration DB, transaction, queue | Frame lỗi/connection idle/stop server không làm treo hoặc rò tài nguyên |
+| M1 | Protocol v2, TCP, lifecycle socket, migration DB, transaction, queue | Frame lỗi/connection idle/stop server không làm treo hoặc rò tài nguyên |
 | M2 | Đăng ký/đăng nhập, profile, friend/block | Không chiếm danh tính, request giả không vượt quyền |
 | M3 | Posts/feed/comments/likes/ảnh | Privacy đúng trên feed, detail, search, event và tải ảnh |
 | M4 | Chat riêng/history/offline, notification, attachment | Restart giữ dữ liệu, retry không tạo bản sao, file đúng SHA-256 |
-| M5 | UDP discovery + typing, reconnect, nhóm, admin/report | UDP mất/giả mạo không phá dữ liệu; quyền nhóm/admin đúng |
+| M5 | TCP LAN, Broadcast, reconnect, nhóm, admin/report | Client nhập IP/port; ba chế độ chat và quyền nhóm/admin đúng |
 | M6 | QA cuối, release, backup/restore, báo cáo và demo nhiều máy | Test bắt buộc và test âm tính đạt |
 
 Mốc là kế hoạch, không phải báo cáo tiến độ. Cập nhật checkbox trong backlog theo bằng chứng thực tế.

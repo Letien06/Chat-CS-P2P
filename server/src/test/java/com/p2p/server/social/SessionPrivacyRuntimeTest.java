@@ -10,7 +10,7 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Regression coverage at the authenticated TLS boundary, beyond service-only policy. */
+/** Regression coverage at the authenticated TCP boundary, beyond service-only policy. */
 class SessionPrivacyRuntimeTest {
     @TempDir Path dir;
     ProtocolRuntimeTest fixture;

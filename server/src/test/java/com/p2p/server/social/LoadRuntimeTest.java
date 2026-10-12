@@ -16,11 +16,7 @@ class LoadRuntimeTest {
     @Test void twentyClientsLargeHistoryAndTwoFullSizeTransfersRemainResponsive()throws Exception {
         Set<Long> baseline=new HashSet<>();
         for(Thread t:Thread.getAllStackTraces().keySet())baseline.add(t.getId());
-        ProtocolRuntimeTest certificates=new ProtocolRuntimeTest();
-        certificates.dir=dir;
-        certificates.setup();
-        certificates.stop();
-        SocialServer server=new SocialServer(new SocialServer.Config(dir.resolve("social.db"),dir.resolve("media"),"127.0.0.1",0,0,0,50,certificates.serverTls,200L*1024*1024,1024L*1024*1024));
+        SocialServer server=new SocialServer(new SocialServer.Config(dir.resolve("social.db"),dir.resolve("media"),"127.0.0.1",0,0,0,50,200L*1024*1024,1024L*1024*1024,true));
         ExecutorService acceptor=Executors.newSingleThreadExecutor(),work=Executors.newFixedThreadPool(20);
         List<ProtocolRuntimeTest.Client> clients=new ArrayList<>();
         List<ProtocolRuntimeTest.Client> idle=new ArrayList<>();
@@ -32,7 +28,7 @@ class LoadRuntimeTest {
         metrics.put("availableProcessors",Runtime.getRuntime().availableProcessors());
         metrics.put("maxHeapMiB",Runtime.getRuntime().maxMemory()/1024.0/1024.0);
         metrics.put("physicalMemoryMiB",((com.sun.management.OperatingSystemMXBean)java.lang.management.ManagementFactory.getOperatingSystemMXBean()).getTotalMemorySize()/1024.0/1024.0);
-        javax.net.ssl.SSLSocket slowReader=null;
+        java.net.Socket slowReader=null;
         Future<?> start=null;
         boolean slowDropped=false;
         long shutdownMs=0; boolean workStopped=false,acceptorStopped=false; List<String> serverThreadsBeforePeerClose=List.of();
@@ -55,7 +51,7 @@ class LoadRuntimeTest {
             }
             long loginStarted=System.nanoTime();
             for(int i=0;i<20;i++) {
-                ProtocolRuntimeTest.Client client=new ProtocolRuntimeTest.Client(certificates.clientTls,server.tcpPort());
+                ProtocolRuntimeTest.Client client=new ProtocolRuntimeTest.Client(server.tcpPort());
                 clients.add(client);
                 client.hello();
                 client.login(String.format("load_%02d",i));
@@ -131,15 +127,15 @@ class LoadRuntimeTest {
             metrics.put("two25MiBUploadDownloadMs",ms(System.nanoTime()-bulkStarted));
             metrics.put("transferredFileBytes",size*2);
             assertTrue(p95(duringBulk)<1500,"Control p95 under transfers exceeded 1500 ms: "+p95(duringBulk));
-            // Thirty additional TLS peers fill the shared cap even without authentication.
+            // Thirty additional TCP peers fill the shared cap even without authentication.
             for(int i=0;i<30;i++) {
-                ProtocolRuntimeTest.Client c=new ProtocolRuntimeTest.Client(certificates.clientTls,server.tcpPort());
+                ProtocolRuntimeTest.Client c=new ProtocolRuntimeTest.Client(server.tcpPort());
                 idle.add(c);
                 c.hello();
             }
             assertEquals(50,server.connectionCount());metrics.put("liveThreadsAt50Connections",Thread.getAllStackTraces().size());metrics.put("ownedThreadsAt50Connections",ownedThreads(baseline).size());
             assertThrows(IOException.class,()-> {
-                try(ProtocolRuntimeTest.Client excess=new ProtocolRuntimeTest.Client(certificates.clientTls,server.tcpPort())) {
+                try(ProtocolRuntimeTest.Client excess=new ProtocolRuntimeTest.Client(server.tcpPort())) {
                     excess.hello();
                 }
             }
@@ -150,14 +146,10 @@ class LoadRuntimeTest {
             deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
             while(server.authenticatedCount()==20&&System.nanoTime()<deadline)Thread.sleep(10);
             assertEquals(19,server.authenticatedCount());
-            slowReader=(javax.net.ssl.SSLSocket)certificates.clientTls.getSocketFactory().createSocket();
+            slowReader=new java.net.Socket();
             slowReader.setReceiveBufferSize(1024);
             slowReader.setSoTimeout(5000);
             slowReader.connect(new java.net.InetSocketAddress("localhost",server.tcpPort()),5000);
-            javax.net.ssl.SSLParameters parameters=slowReader.getSSLParameters();
-            parameters.setEndpointIdentificationAlgorithm("HTTPS");
-            slowReader.setSSLParameters(parameters);
-            slowReader.startHandshake();
             rawRequest(slowReader,"HELLO",Map.of("supportedVersions",List.of(2),"clientVersion","slow-reader-test"));
             rawRequest(slowReader,"AUTH_LOGIN",Map.of("username","load_00","password",PASSWORD));
             assertEquals(20,server.authenticatedCount());
@@ -197,7 +189,7 @@ class LoadRuntimeTest {
             work.shutdownNow();
             long before=System.nanoTime();
             try {
-                // Server shutdown must release blocking TLS I/O while peers remain open.
+                // Server shutdown must release blocking TCP I/O while peers remain open.
                 server.close();
                 acceptor.shutdownNow();
                 workStopped=work.awaitTermination(5,TimeUnit.SECONDS);
@@ -422,7 +414,7 @@ class LoadRuntimeTest {
         }
         );
     }
-    static void rawRequest(javax.net.ssl.SSLSocket socket,String type,Map<String,Object> payload)throws Exception {
+    static void rawRequest(java.net.Socket socket,String type,Map<String,Object> payload)throws Exception {
         com.p2p.common.social.WireMessage request=com.p2p.common.social.WireMessage.request(type,payload);
         com.p2p.common.social.WireCodec.write(new DataOutputStream(socket.getOutputStream()),request);
         DataInputStream input=new DataInputStream(socket.getInputStream());
@@ -454,4 +446,3 @@ class LoadRuntimeTest {
         );
     }
 }
-

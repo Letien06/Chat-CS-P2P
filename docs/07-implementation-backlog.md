@@ -1,5 +1,7 @@
 # 07 — Backlog và cách chuyển kế hoạch thành source
 
+> Phạm vi hiện tại (12/10/2026): TCP/IP thường; không dùng TLS. UDP tắt mặc định, các phần UDP bên dưới chỉ là mô tả tương thích/tuỳ chọn.
+
 Tất cả checkbox dưới đây **chưa thực hiện trong đợt viết tài liệu**. P0/P1 là bắt buộc để hoàn thành phạm vi plan; P2 ngoài phạm vi. Không estimate deadline khi chưa biết ngày nộp và số thành viên.
 
 ## 1. M0 — Baseline và chuẩn bị
@@ -12,7 +14,7 @@ Tất cả checkbox dưới đây **chưa thực hiện trong đợt viết tài
 
 - [ ] **B03 — P0:** Common v2 envelope, typed DTO, error catalog, 1 MiB frame limit; codec stateless bỏ static global lock. QA-NET01/02.
 - [ ] **B04 — P0:** HELLO/version/capabilities, client request futures/deadline, tách response/event. Đầu ra: event chen giữa response không nhầm request. QA-NET03.
-- [ ] **B05 — P0:** TLS server/client, keystore/truststore/pin ngoài discovery; config fail-fast. Đầu ra: cert đúng chạy, cert giả bị reject trước password. QA-SEC01.
+- [x] **B05 — P0:** TCP Socket/ServerSocket, client nhập IP/port; bỏ TLS và script chứng chỉ; config fail-fast. QA-SEC01 kiểm framing/session, không kiểm chứng chỉ.
 - [ ] **B06 — P0:** Registry mọi socket + semaphore/pool bound + auth deadline + heartbeat. Đầu ra: idle chưa login cũng chiếm permit và bị timeout; connection sau cap bị từ chối có kiểm soát. QA-LIFE01.
 - [ ] **B07 — P0:** Per-connection writer queue giới hạn item/byte, ưu tiên control, xử lý slow client; close sockets/await/db close đúng lifecycle. QA-LIFE02/03.
 - [ ] **B08 — P0:** Database migrations + schema v2 mới + writer/read executors + transaction abstraction/FK/index. Đầu ra: fresh install/nâng version/rollback failure pass. QA-DATA01/02.
@@ -62,7 +64,7 @@ M4 gate: B offline, A gửi text + attachment, server restart, B login nhận đ
 ## 6. M5 — UDP, nhóm và quản trị
 
 - [ ] **B34 — P0:** UDP DISCOVER/OFFER nonce/rate-limit/bounded size, multi-interface broadcast + nhập IP/unicast fallback. QA-UDP01/02.
-- [ ] **B35 — P1:** Per-session UDP key TLS cấp/refresh/revoke, signed register/endpoint binding/direction HMAC/seq/time check. QA-UDP03/04.
+- [ ] **B35 — P1:** Per-session UDP key TCP cấp/refresh/revoke, signed register/endpoint binding/direction HMAC/seq/time check. QA-UDP03/04.
 - [ ] **B36 — P1:** Typing UDP debounce/TTL/fan-out policy; packet loss không ảnh hưởng chat/presence. QA-UDP05.
 - [ ] **B37 — P1:** GROUP_CREATE/invite/accept/reject/cancel/list, period visibleFromSeq, owner invariant/cap20. BR-09; QA-GROUP01.
 - [ ] **B38 — P1:** Group rename/kick/leave/transfer/disband, history/media/read policy theo period; block exception rõ. QA-GROUP02/03.
@@ -77,8 +79,8 @@ UDP discovery có thể làm song song sau B05/B06 để có minh chứng môn h
 - [ ] **B42 — P0:** Bộ integration contract/policy/race/restart từ [08](08-testing-release.md), fixture/capture logs redacted. Không chỉ happy path.
 - [ ] **B43 — P1:** Load20 online/50 sockets, slow reader, bulk transfer + chat latency, invalid frame/repeated auth, leak/shutdown; lưu kết quả đo. QA-PERF01/02.
 - [ ] **B44 — P1:** Backup offline nhất quán DB+media, inventory/hash/restore drill; log rotate + safe cleanup retention. QA-OPS01/02.
-- [ ] **B45 — P0:** Release JAR/source/config example/truststore/client instructions/server no-ui/firewall/VM instructions; smoke từ thư mục mới. QA-REL01/02.
-- [ ] **B46 — P0:** Seed demo + kịch bản 3 user/admin nhiều máy; screenshot/capture TCP TLS & UDP, chứng cứ persistence và privacy. QA-DEMO.
+- [ ] **B45 — P0:** Release JAR/source/config example/client instructions/server no-ui/firewall/VM instructions; smoke từ thư mục mới. QA-REL01/02.
+- [ ] **B46 — P0:** Seed demo + kịch bản 3 user/admin nhiều máy; screenshot/capture TCP, chứng cứ persistence và privacy. QA-DEMO.
 - [ ] **B47 — P0:** Báo cáo cuối, UML/ERD/sequence, bảng yêu cầu–test–kết quả, giới hạn trung thực, kiểm link/docs theo implementation. Gate cuối P0/P1 hoàn tất.
 
 ## 8. Phụ thuộc và chia việc nếu có nhóm

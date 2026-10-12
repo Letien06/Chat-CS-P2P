@@ -16,7 +16,7 @@ import java.util.concurrent.*;
 import java.util.function.*;
 import static com.p2p.client.ui.social.Values.*;
 
-/** Social desktop v2. All commands, TLS, hashing and file IO run outside Swing's EDT. */
+/** Social desktop v2. All commands, TCP IO, hashing and file IO run outside Swing's EDT. */
 public final class SocialWindow extends JFrame {
     private final ExecutorService workers=Executors.newFixedThreadPool(4,r->{Thread t=new Thread(r,"social-ui-worker");t.setDaemon(true);return t;});
     private final JPanel root=new JPanel(new BorderLayout());
@@ -28,7 +28,6 @@ public final class SocialWindow extends JFrame {
     private JButton broadcastNav;
     private JButton currentActionSource;
     private volatile SocialClient client;
-    private javax.net.ssl.SSLContext connectionTlsContext;
     private volatile long reconnectToken;
     private long pendingOwnerId;
     private long udpExpiresAt;
@@ -38,7 +37,6 @@ public final class SocialWindow extends JFrame {
     private final ThumbnailCache thumbnails=new ThumbnailCache();
     private Map<String,Object> currentUser=new LinkedHashMap<>();
     private String host=System.getProperty("social.host","localhost");private int port=Integer.getInteger("social.port",5000);
-    private String truststore=System.getProperty("social.truststore","config/tls/truststore.p12");
     private String view="";
     private Runnable refreshCurrent=()->{};
     private boolean authenticated;
@@ -123,7 +121,6 @@ public final class SocialWindow extends JFrame {
         case "TRANSFER_EXPIRED"->"Lượt tải đã hết hạn. Hãy chọn tiếp tục để lấy lượt tải mới.";case "SERVER_BUSY"->"Server đang bận. Chờ một chút rồi thử lại.";
         case "IDEMPOTENCY_CONFLICT"->"Mã thao tác đã gắn với nội dung khác. Tra cứu kết quả cũ trước khi thay đổi nội dung.";case "VERSION_UNSUPPORTED"->"Phiên bản client không tương thích server.";
         case "UNSUPPORTED_OPERATION"->"Server chưa hỗ trợ thao tác này.";case "INTERNAL_ERROR"->"Server không xử lý được thao tác. Hãy thử lại sau.";default->code+" · "+Objects.toString(e.getMessage(),"Không thể thực hiện");};}
-        if(e instanceof javax.net.ssl.SSLException)return "Không xác minh được chứng chỉ TLS. Kiểm tra host và truststore do người vận hành cung cấp.";
         return Objects.toString(e.getMessage(),"Không thể kết nối. Hãy thử lại.");}
     private void showError(Throwable e){if(!SwingUtilities.isEventDispatchThread()){invoke(()->showError(e));return;}JOptionPane.showMessageDialog(this,friendly(e),"Không thể thực hiện",JOptionPane.WARNING_MESSAGE);}
     private void info(String s){JOptionPane.showMessageDialog(this,s,"Kết Nối",JOptionPane.INFORMATION_MESSAGE);}
@@ -133,33 +130,26 @@ public final class SocialWindow extends JFrame {
         reconnectToken++;authenticated=false;generation++;activeConversation=0;messages.clear();currentUser.clear();thumbnails.bind(null);countRefresh.stop();udpRefresh.stop();for(Window window:getOwnedWindows())window.dispose();root.removeAll();
         JPanel center=new JPanel(new GridBagLayout());center.setBorder(new EmptyBorder(20,20,20,20));JPanel panel=card();panel.setPreferredSize(new Dimension(600,650));
         JPanel fields=vertical();fields.add(label("Kết Nối",true));fields.add(label(register?"Tạo tài khoản · Mạng xã hội lớp học":"Chào bạn · Đăng nhập để tiếp tục",false));fields.add(Box.createVerticalStrut(20));
-        JTextField hostField=new JTextField(host),portField=new JTextField(String.valueOf(port)),trustField=new JTextField(truststore);
-        JPasswordField trustPassword=new JPasswordField(Objects.toString(System.getenv("SOCIAL_TRUSTSTORE_PASSWORD"),Objects.toString(System.getenv("SOCIAL_TLS_PASSWORD"),"changeit")));
+        JTextField hostField=new JTextField(host),portField=new JTextField(String.valueOf(port));
         JTextField user=new JTextField(),display=new JTextField();JPasswordField password=new JPasswordField(),confirmPassword=new JPasswordField();
-        String[] offeredServerId={null};String[] offeredHost={null};int[] offeredPort={0};
         addField(fields,"Máy chủ / TCP port",horizontal(hostField,portField));hostField.setColumns(23);portField.setColumns(6);
-        JPanel tlsOptions=vertical();addField(tlsOptions,"Truststore PKCS12 (TCP/TLS)",trustField);addField(tlsOptions,"Mật khẩu truststore",trustPassword);tlsOptions.add(horizontal(button("Chọn truststore",()->{JFileChooser c=new JFileChooser();if(c.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)trustField.setText(c.getSelectedFile().getAbsolutePath());})));tlsOptions.setVisible(false);
-        fields.add(horizontal(button("Thiết lập TLS",()->{tlsOptions.setVisible(!tlsOptions.isVisible());fields.revalidate();fields.repaint();})));
-        fields.add(tlsOptions);
         fields.add(Box.createVerticalStrut(12));if(register){JPanel names=new JPanel(new GridLayout(1,2,12,0));JPanel usernameColumn=vertical(),displayColumn=vertical();addField(usernameColumn,"Tên đăng nhập",user);addField(displayColumn,"Tên hiển thị",display);names.add(usernameColumn);names.add(displayColumn);names.setMaximumSize(new Dimension(Integer.MAX_VALUE,names.getPreferredSize().height));fields.add(names);}else addField(fields,"Tên đăng nhập",user);
         addField(fields,"Mật khẩu",password);if(register)addField(fields,"Xác nhận mật khẩu",confirmPassword);
-        JLabel state=label("TCP/TLS · Nhập IP server, port, tài khoản và mật khẩu · Không lưu mật khẩu",false);fields.add(state);
+        JLabel state=label("TCP/IP · Nhập IP server, port, tài khoản và mật khẩu",false);fields.add(state);
         JButton submit=Theme.primaryButton(register?"Đăng ký":"Đăng nhập");
-        submit.addActionListener(e->{char[] secret=password.getPassword(),repeat=confirmPassword.getPassword(),trust=trustPassword.getPassword();
-            if(user.getText().trim().isEmpty()||secret.length<10||secret.length>128){Arrays.fill(secret,'\0');Arrays.fill(repeat,'\0');Arrays.fill(trust,'\0');info("Nhập tên đăng nhập và mật khẩu từ 10–128 ký tự.");return;}
-            if(register&&(!Arrays.equals(secret,repeat)||display.getText().isBlank())){Arrays.fill(secret,'\0');Arrays.fill(repeat,'\0');Arrays.fill(trust,'\0');info("Điền tên hiển thị và xác nhận mật khẩu trùng khớp.");return;}
-            Arrays.fill(repeat,'\0');String username=user.getText().trim(),name=display.getText().trim(),serverHost=hostField.getText().trim(),store=trustField.getText().trim();
-            int serverPort;try{serverPort=Integer.parseInt(portField.getText());if(serverPort<1||serverPort>65535)throw new NumberFormatException();}catch(NumberFormatException ex){Arrays.fill(secret,'\0');Arrays.fill(trust,'\0');info("Port cần nằm trong 1–65535.");return;}
-            submit.setEnabled(false);state.setText("Đang kết nối TLS và xác thực…");reconnectToken++;
-            String expectedServer=serverHost.equals(offeredHost[0])&&serverPort==offeredPort[0]?offeredServerId[0]:null;
+        submit.addActionListener(e->{char[] secret=password.getPassword(),repeat=confirmPassword.getPassword();
+            if(user.getText().trim().isEmpty()||secret.length<10||secret.length>128){Arrays.fill(secret,'\0');Arrays.fill(repeat,'\0');info("Nhập tên đăng nhập và mật khẩu từ 10–128 ký tự.");return;}
+            if(register&&(!Arrays.equals(secret,repeat)||display.getText().isBlank())){Arrays.fill(secret,'\0');Arrays.fill(repeat,'\0');info("Điền tên hiển thị và xác nhận mật khẩu trùng khớp.");return;}
+            Arrays.fill(repeat,'\0');String username=user.getText().trim(),name=display.getText().trim(),serverHost=hostField.getText().trim();
+            int serverPort;try{serverPort=Integer.parseInt(portField.getText());if(serverPort<1||serverPort>65535)throw new NumberFormatException();}catch(NumberFormatException ex){Arrays.fill(secret,'\0');info("Port cần nằm trong 1–65535.");return;}
+            submit.setEnabled(false);state.setText("Đang kết nối TCP và xác thực…");reconnectToken++;
             CompletableFuture.supplyAsync(()->{
-                SocialClient c=null;try{if(client!=null)client.close();connectionTlsContext=TlsContexts.client(Path.of(store),trust);c=new SocialClient(serverHost,serverPort,connectionTlsContext);Map<String,Object> hello=c.connect().join();
-                    if(expectedServer!=null&&!expectedServer.equals(str(hello,"serverId")))throw new SecurityException("ServerId TLS không khớp máy chủ LAN đã chọn.");
+                SocialClient c=null;try{if(client!=null)client.close();c=new SocialClient(serverHost,serverPort);Map<String,Object> hello=c.connect().join();
                     Map<String,Object> login=c.request(register?"AUTH_REGISTER":"AUTH_LOGIN",of("username",username,"password",new String(secret),"displayName",register?name:null)).join();
                     client=c;return login;
-                }catch(Throwable ex){if(c!=null)c.close();throw new CompletionException(ex);}finally{Arrays.fill(secret,'\0');Arrays.fill(trust,'\0');}
+                }catch(Throwable ex){if(c!=null)c.close();throw new CompletionException(ex);}finally{Arrays.fill(secret,'\0');}
             },workers).whenComplete((login,error)->invoke(()->{
-                password.setText("");confirmPassword.setText("");submit.setEnabled(true);host=serverHost;port=serverPort;truststore=store;
+                password.setText("");confirmPassword.setText("");submit.setEnabled(true);host=serverHost;port=serverPort;
                 if(error!=null){state.setText("Chưa kết nối · có thể thử lại");showError(error);return;}
                 if(register){info("Tạo tài khoản thành công. Hãy đăng nhập.");client.close();client=null;showAuth(false);return;}
                 currentUser=map(login.get("currentUser"));if(currentUser.isEmpty())currentUser=map(login.get("user"));
@@ -180,7 +170,7 @@ public final class SocialWindow extends JFrame {
         workers.execute(()->{try{UdpClient created=new UdpClient(host,(int)(num(finalConfig,"serverUdpPort")==0?5002:num(finalConfig,"serverUdpPort")));created.onTyping(p->invoke(()->{
                     if(!authenticated||client!=expected||udp!=created)return;if(activeConversation==num(p,"conversationId")&&typingLabel!=null){long remaining=num(p,"expiresAt")-expected.serverTime();if(bool(p,"typing")&&remaining>0){typingLabel.setText("Bạn cùng trò chuyện đang nhập…");typingExpiry.setInitialDelay((int)Math.min(5000,remaining));typingExpiry.restart();}else{typingLabel.setText(" ");typingExpiry.stop();}}
                 }));created.configure(finalConfig,expected.serverTime());invoke(()->{if(client==expected&&authenticated){udp=created;udpRefresh.start();}else created.close();});
-        }catch(Exception ignored){/* UDP loss never prevents reliable TLS chat. */}});
+        }catch(Exception ignored){/* UDP is disabled in the default TCP-only profile. */}});
     }
     private void refreshUdp(){if(!authenticated||udp==null||client==null||client.serverTime()<udpExpiresAt-120000)return;query("UDP_SESSION_REFRESH",of(),p->{setupUdp(p);});}
     private void showMain(){
@@ -192,14 +182,14 @@ public final class SocialWindow extends JFrame {
         if("ADMIN".equals(str(currentUser,"role"))){sidebar.add(Box.createVerticalStrut(10));sidebar.add(button("Quản trị",this::showAdmin));}
         sidebar.add(Box.createVerticalGlue());sidebar.add(button("Tiếp tục tải tệp",()->media.resumeUploads(this)));sidebar.add(Box.createVerticalStrut(10));sidebar.add(button("Đăng xuất",this::logout));
         JPanel footer=horizontal(connection,button("Đồng bộ",()->{query("STATE_SYNC",of("limit",20),r->{refreshCurrent.run();refreshCount();});}),button("Đăng nhập lại",()->{reconnectToken++;if(client!=null)client.close();showAuth(false);}));
-        connection.setText("● Đã kết nối TLS · "+host+":"+port);root.add(sidebar,BorderLayout.WEST);root.add(body);root.add(footer,BorderLayout.SOUTH);root.revalidate();root.repaint();getRootPane().setDefaultButton(null);countRefresh.start();refreshCount();
+        connection.setText("● Đã kết nối TCP · "+host+":"+port);root.add(sidebar,BorderLayout.WEST);root.add(body);root.add(footer,BorderLayout.SOUTH);root.revalidate();root.repaint();getRootPane().setDefaultButton(null);countRefresh.start();refreshCount();
     }
     private void logout(){query("AUTH_LOGOUT",of(),r->{clearSession();showAuth(false);});}
     private void clearSession(){reconnectToken++;authenticated=false;thumbnails.bind(null);udpRefresh.stop();for(Window window:getOwnedWindows())window.dispose();if(udp!=null){udp.close();udp=null;}if(client!=null){client.close();client=null;}media.close();media=new MediaTransfers(()->client,this::showError);messages.clear();pendingMessages.clear();resetBroadcast();pendingOwnerId=0;currentUser.clear();body.removeAll();}
     private void disconnected(Throwable error){authenticated=false;connection.setText("● Mất kết nối · dữ liệu đang xem có thể cũ · đang thử kết nối lại");if(udp!=null)udp.close();udpRefresh.stop();media.disconnected();if(chatInput!=null)chatInput.setEnabled(false);if(typingLabel!=null)typingLabel.setText(" ");countRefresh.stop();disableButtons(body);long token=++reconnectToken;
         if(error==null)return;workers.execute(()->{for(int attempt=0;attempt<6&&reconnectToken==token;attempt++){
-            try{Thread.sleep(Math.min(30000,1000L<<attempt)+ThreadLocalRandom.current().nextInt(250));if(reconnectToken!=token)return;SocialClient candidate=new SocialClient(host,port,connectionTlsContext);
-                try{candidate.connect().join();if(reconnectToken!=token){candidate.close();return;}client=candidate;invoke(()->{if(reconnectToken==token){showAuth(false);info("Đã nối lại TLS. Đăng nhập lại; tin chưa xác định vẫn giữ mã cũ khi bạn trở lại cuộc trò chuyện.");}});return;}catch(Throwable e){candidate.close();}
+            try{Thread.sleep(Math.min(30000,1000L<<attempt)+ThreadLocalRandom.current().nextInt(250));if(reconnectToken!=token)return;SocialClient candidate=new SocialClient(host,port);
+                try{candidate.connect().join();if(reconnectToken!=token){candidate.close();return;}client=candidate;invoke(()->{if(reconnectToken==token){showAuth(false);info("Đã nối lại TCP. Đăng nhập lại; tin chưa xác định vẫn giữ mã cũ khi bạn trở lại cuộc trò chuyện.");}});return;}catch(Throwable e){candidate.close();}
             }catch(InterruptedException e){Thread.currentThread().interrupt();return;}
         }invoke(()->{if(reconnectToken==token)connection.setText("● Chưa kết nối · bấm Đăng nhập lại để thử tiếp");});});
     }
@@ -214,7 +204,7 @@ public final class SocialWindow extends JFrame {
         if("PRESENCE_CHANGED".equals(type)&&"people".equals(view)){updatePresence(body,num(p,"userId"),bool(p,"online"),num(p,"asOf"));return;}
         if("feed".equals(view)&&Set.of("POST_INVALIDATED","COMMENT_INVALIDATED","LIKE_INVALIDATED").contains(type)){
             if("POST_INVALIDATED".equals(type))invalidateVisiblePost(body,num(p,"postId"));
-            connection.setText("● Đã kết nối TLS · bảng tin có cập nhật · bấm Đồng bộ / Làm mới để xem");return;
+            connection.setText("● Đã kết nối TCP · bảng tin có cập nhật · bấm Đồng bộ / Làm mới để xem");return;
         }
         if("MESSAGE_CREATED".equals(type)){Map<String,Object> m=map(p.get("message"));if(m.isEmpty())m=p;if(activeConversation==num(m,"conversationId")){upsertMessage(m);renderMessages(false);ackMessages();}return;}
         if("RECEIPT_UPDATED".equals(type)&&activeConversation==num(p,"conversationId")){List<Map<String,Object>> receipts=rows(p.get("receipts"));if(receipts.isEmpty())receipts=List.of(p);for(Map<String,Object> m:messages.values()){

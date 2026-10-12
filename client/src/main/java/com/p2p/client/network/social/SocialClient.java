@@ -1,6 +1,5 @@
 package com.p2p.client.network.social;
 import com.p2p.common.social.*;
-import javax.net.ssl.*;
 import java.net.*;
 import java.io.*;
 import java.util.*;
@@ -11,8 +10,7 @@ import java.util.function.Consumer;
 public final class SocialClient implements AutoCloseable {
     private final String host;
     private final int port;
-    private final SSLContext tls;
-    private volatile SSLSocket socket;
+    private volatile Socket socket;
     private final ExecutorService io=Executors.newFixedThreadPool(3);
     private final ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();
     private final ConcurrentMap<String,CompletableFuture<Map<String,Object>>> pending=new ConcurrentHashMap<>();
@@ -24,10 +22,9 @@ public final class SocialClient implements AutoCloseable {
     private volatile long lastRead=System.nanoTime();
     private volatile Map<String,Object> hello=Map.of(),session=Map.of();
     private volatile long serverOffset;
-    public SocialClient(String host,int port,SSLContext tls) {
+    public SocialClient(String host,int port) {
         this.host=host;
         this.port=port;
-        this.tls=tls;
     }
     public CompletableFuture<Map<String,Object>> connect() {
         CompletableFuture<Map<String,Object>> result=new CompletableFuture<>();
@@ -37,10 +34,7 @@ public final class SocialClient implements AutoCloseable {
         }
         io.execute(()-> {
             try {
-                SSLSocket s=(SSLSocket)tls.getSocketFactory().createSocket();socket=s;s.connect(new InetSocketAddress(host,port),5000);s.setSoTimeout(5000);SSLParameters p=s.getSSLParameters();p.setEndpointIdentificationAlgorithm("HTTPS");p.setProtocols(new String[] {
-                    "TLSv1.3","TLSv1.2"
-                }
-                );s.setSSLParameters(p);s.startHandshake();s.setSoTimeout(0);io.execute(this::reader);io.execute(this::writer);request("HELLO",Map.of("supportedVersions",List.of(2),"clientVersion","2.0")).whenComplete((v,e)-> {
+                Socket s=new Socket();socket=s;s.connect(new InetSocketAddress(host,port),5000);s.setSoTimeout(0);s.setTcpNoDelay(true);io.execute(this::reader);io.execute(this::writer);request("HELLO",Map.of("supportedVersions",List.of(2),"clientVersion","2.0")).whenComplete((v,e)-> {
                     if(e!=null) {
                         result.completeExceptionally(e);fail(e);
                     }

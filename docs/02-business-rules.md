@@ -1,5 +1,7 @@
 # 02 — Đặc tả nghiệp vụ, quyền và trạng thái
 
+> Phạm vi hiện tại (12/10/2026): TCP/IP thường; không dùng TLS. UDP tắt mặc định, các phần UDP bên dưới chỉ là mô tả tương thích/tuỳ chọn.
+
 **Trạng thái: thiết kế mục tiêu v2, chưa triển khai.** Requirement ID BR-* dùng trong backlog/test. Các giới hạn dưới đây là giá trị mặc định; thay đổi phải đồng bộ config/DTO/UI/test.
 
 ## 1. Tác nhân và nguyên tắc chung — BR-01
@@ -29,7 +31,7 @@ Luồng: validate → hash ngoài transaction → INSERT users/profiles trong tr
 
 ### Đăng nhập/đăng xuất
 
-- Login qua TLS. Sai username/password dùng chung INVALID_CREDENTIALS; có rate limit theo IP và username_key.
+- Login qua TCP. Sai username/password dùng chung INVALID_CREDENTIALS; có rate limit theo IP và username_key.
 - Một user một session. Sau password hợp lệ, kiểm tra ACTIVE và atomic reserve userId. Nếu phiên còn sống trả ALREADY_SIGNED_IN; nếu session đã timeout thì cleanup trước khi cho phiên mới.
 - Auth state: CONNECTED → NEGOTIATED → AUTHENTICATED → CLOSING → CLOSED. AUTH bắt buộc sau HELLO v2; không giữ đường JOIN nickname bên cạnh auth.
 - Logout/EOF/heartbeat timeout thu hồi session, UDP key và download/upload capability. Không xóa dữ liệu nghiệp vụ.
@@ -134,7 +136,7 @@ Phân biệt avatar, ảnh post, attachment chat. Mỗi media chỉ gắn một 
 Luồng: INIT → UPLOADING → VERIFYING → READY → ATTACHED; khi bỏ reference cuối chuyển RETIRED, không quay lại READY và không bind lại. Các nhánh CANCELLED/FAILED/EXPIRED. READY chưa attach chỉ owner được truy cập. Client không gửi storage path; server cấp mediaId và lưu file tên UUID trong root riêng.
 
 - Avatar/ảnh: JPEG/PNG, kiểm magic bytes, decode được, ≤5 MiB và ≤20 megapixel. Avatar tạo thumbnail server; không nhận SVG/executable dưới MIME ảnh.
-- File chat: ≤25 MiB, tên hiển thị ≤120, basename và filename hợp lệ; không tự mở/chạy file nhận. SHA-256 bắt buộc; checksum kiểm integrity, TLS/session xác thực bên gửi.
+- File chat: ≤25 MiB, tên hiển thị ≤120, basename và filename hợp lệ; không tự mở/chạy file nhận. SHA-256 bắt buộc; checksum kiểm integrity, session xác thực bên gửi.
 - Quota mặc định 200 MiB/user, 2 upload hoạt động/user, 20 upload/server, 10 GiB storage server; reserve quota khi init, release terminal. Không tiếp tục mặc định relay 2 GiB.
 - Chunk decoded ≤48 KiB, exact offset, max byte theo offer; ACK chỉ offset đã ghi. Commit kiểm size/hash thực tế rồi atomic move cùng filesystem.
 - Upload mất mạng giữ `.part` tối đa 24 giờ; sau login lại owner gọi STATUS/RESUME lấy offset đã ghi, hash metadata phải khớp. Không tin offset client tự khai. READY chưa attach dọn sau 24 giờ.
